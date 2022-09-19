@@ -1,0 +1,16 @@
+[package]
+name = "hactool-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.65"
+binread = { version = "2.2.0", features = ["std", "const_generics"]}
+clap = { version = "3.2.21", features = ["derive"] }
+memmap = "0.7.0"
+nom = "7.1.1"
+nom-derive = "0.10.0"
+proc-bitfield = "0.1.1"
+
