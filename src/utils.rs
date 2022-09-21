@@ -1,6 +1,6 @@
 use std::io::{Read, Seek, SeekFrom, Cursor};
 
-use binrw::{BinRead, BinReaderExt, ReadOptions, BinResult, helpers::until_eof, file_ptr::IntoSeekFrom, FilePtr};
+use binrw::{BinRead, ReadOptions, BinResult, helpers::until_eof, file_ptr::IntoSeekFrom, FilePtr};
 
 #[derive(Debug)]
 pub struct CurPos(pub u64);
@@ -8,7 +8,7 @@ pub struct CurPos(pub u64);
 impl BinRead for CurPos {
     type Args = ();
 
-    fn read_options<R: Read + Seek>(reader: &mut R, ro: &ReadOptions, args: Self::Args) -> BinResult<Self> {
+    fn read_options<R: Read + Seek>(reader: &mut R, _: &ReadOptions, _: Self::Args) -> BinResult<Self> {
         Ok(CurPos(reader.stream_position()?))
     }
 }

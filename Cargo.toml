@@ -15,5 +15,6 @@ clap = { version = "3.2.21", features = ["derive"] }
 memmap = "0.7.0"
 nom = "7.1.1"
 nom-derive = "0.10.0"
+num_enum = "0.5.7"
 proc-bitfield = "0.1.1"
 

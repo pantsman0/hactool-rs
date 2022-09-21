@@ -1,7 +1,7 @@
-use std::{path::Path, io::{Read, Seek, SeekFrom}};
+use std::path::Path;
 
-use anyhow::Result;
-use binrw::{BinRead, BinReaderExt, FilePtr32, count, ReadOptions, FixedLenString};
+use binrw::{BinRead, BinReaderExt, FilePtr32, FixedLenString, BinResult};
+use num_enum::{FromPrimitive, IntoPrimitive};
 use proc_bitfield::bitfield;
 
 
@@ -74,66 +74,24 @@ bitfield!{
 }
 
 mod kernel_capability {
+
+    use binrw::BinRead;
+    use num_enum::{IntoPrimitive, FromPrimitive};
     use proc_bitfield::bitfield;
 
     #[derive(Debug)]
     pub enum KernelCapability {
         ThreadInfo(ThreadInfo),
         EnableSystemCalls(SystemCalls),
-        MemoryMap(MemoryMap),
+        MemoryMap(MemoryMapAddrRo, MemoryMapSizeType),
         IoMemoryMap(IoMemoryMap),
         MemoryRegionMap(MemoryRegionMap),
-        EnableInterupts(Interupts),
+        EnableInterrupts(Interrupts),
         MiscParams(MiscParams),
         KernelVersion(KernelVersion),
         HandleTableSize(HandleTableSize),
         MiscFlags(MiscFlags),
-        Invalid
-    }
-
-    impl From<u32> for KernelCapability {
-        fn from(val: u32) -> Self {
-            match val.trailing_ones() {
-                3 => {Self::ThreadInfo(ThreadInfo{})},
-                _ => Self::Invalid
-            }
-        }
-    }
-    #[derive(Debug)]
-    struct KacMmioRecord {
-        pub address: u64,
-        pub size: u64,
-        pub is_ro: bool,
-        pub is_norm: bool,
-        //pub next: &KacMmioRecord,
-    }
-
-    #[derive(Debug)]
-    struct KacIrqRecord {
-        pub irq1: u32,
-        pub irq2: u32,
-    // pub next: &KacIrqRecord
-    }
-
-    #[derive(Debug)]
-    struct KacRecord {
-        pub has_kernel_flags: bool,
-        pub lowest_thread_priority: u32,
-        pub hightest_thread_priority: u32,
-        pub lowest_cpu_id: u32,
-        pub highest_cpu_id: u32,
-        pub svc_allowed: [u8;0x80],
-        pub mmios: Vec<KacMmioRecord>,
-        pub irqs: Vec<KacIrqRecord>,
-        pub has_application_type: bool,
-        pub application_type: u32,
-        pub has_kernel_version: bool,
-        pub kernel_version: u32,
-        pub has_handle_table_size: bool,
-        pub handle_table_size: u32,
-        pub has_debug_flags: bool,
-        pub allow_debug: bool,
-        pub force_debug: bool
+        Invalid(u32)
     }
 
     bitfield! {
@@ -145,6 +103,8 @@ mod kernel_capability {
             pub highest_cpu_id: u8 @ 24..=31,
         }
     }
+
+    
     bitfield!{
         pub struct SystemCalls(u32): Debug {
             pub raw: u32 @ ..,
@@ -152,32 +112,151 @@ mod kernel_capability {
             pub index: u8 @ 29..=31
         }
     }
+    
+    #[repr(u8)]
+    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    pub enum MemoryMapPermission {
+        #[default]
+        Rw = 0,
+        Ro
+    }
+    #[repr(u8)]
+    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    pub enum MemoryMapType {
+        #[default]
+        Io,
+        Static
+    }
     bitfield!{
-        pub struct MemoryMap(u32, u32): Debug {}
-    }   
-     #[derive(Debug)]
-    pub struct IoMemoryMap;
-    #[derive(Debug)]
-    pub struct MemoryRegionMap;
-    #[derive(Debug)]
-    pub struct Interupts;
-    #[derive(Debug)]
-    pub struct MiscParams;
-    #[derive(Debug)]
-    pub struct KernelVersion;
-    #[derive(Debug)]
-    pub struct HandleTableSize;
-    #[derive(Debug)]
-    pub struct MiscFlags;
+        pub struct MemoryMapAddrRo(u32): Debug {
+            pub raw: u32 @ ..,
+            pub start_address: u32 @ 7..=30,
+            pub memory_permission: u8 [MemoryMapPermission] @ 31..=31
+        }
+    } 
+    bitfield!{
+        pub struct MemoryMapSizeType(u32): Debug {
+            pub raw: u32 @ ..,
+            pub size: u32 @ 7..=26,
+            pub map_type: u8 [MemoryMapType] @ 31..=31
+        }
+    } 
+    
+    bitfield!{
+        pub struct IoMemoryMap(u32): Debug{
+            pub raw: u32 @ ..,
+            pub start_address: u32 @ 8..=31
+        }
+    }
+
+    #[repr(u8)]
+    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    pub enum MemoryRegionType {
+        NoMapping = 0,
+        KernelTraceBuffer,
+        OnMemoryBootImage,
+        DTB,
+
+        #[default]
+        Invalid
+    }
+    bitfield! {
+        pub struct MemoryRegionMap(u32): Debug {
+            pub raw: u32 @ ..,
+            pub region0_type: u8 [MemoryRegionType] @ 11..=16,
+            pub region0_is_ro: bool @ 17,
+            pub region1_type: u8 [MemoryRegionType] @ 18..=23,
+            pub region1_is_ro: bool @ 24,
+            pub region2_type: u8 [MemoryRegionType] @ 25..=30,
+            pub region2_is_ro: bool @ 31
+        }
+    }
+
+    bitfield! {
+        pub struct Interrupts(u32): Debug {
+            pub raw: u32 @ ..,
+            pub irq1: u16 @ 12..=21,
+            pub irq2: u16 @ 22..=31
+        }
+    }
+
+    #[repr(u8)]
+    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    pub enum ProgramType {
+        System = 0,
+        Application,
+        Applet,
+
+        #[default]
+        Invalid
+    }
+    bitfield! {
+        pub struct MiscParams(u32): Debug {
+            pub raw: u32 @ ..,
+            pub program_type: u8 [ProgramType] @ 14..=16,
+        }
+    }
+
+    bitfield!{
+        pub struct KernelVersion(u32): Debug {
+            pub raw: u32 @ ..,
+            pub minor_version: u8 @ 15..=18,
+            pub major_version: u16 @ 19..=31 
+        }
+    }
+    bitfield!{
+        pub struct HandleTableSize(u32): Debug {
+            pub raw: u32 @ ..,
+            pub table_size: u16 @ 16..=25
+        }
+    }
+    bitfield!{
+        pub struct MiscFlags(u32): Debug {
+            pub raw: u32 @ ..,
+            pub enable_debug: bool @ 17,
+            pub force_debug: bool @ 18
+        }
+    }
+
+    impl BinRead for KernelCapability {
+        type Args = ();
+        fn read_options<R: std::io::Read + std::io::Seek>(
+                reader: &mut R,
+                options: &binrw::ReadOptions,
+                args: Self::Args,
+            ) -> binrw::BinResult<Self> {
+                let raw_kc = u32::read_options(reader, options, args)?;
+                match raw_kc.trailing_ones() {
+                    3 => Ok(Self::ThreadInfo(ThreadInfo(raw_kc))),
+                    4 => Ok(Self::EnableSystemCalls(SystemCalls(raw_kc))),
+                    6 => {
+                        //MemoryMaps come in pairs of 2 so the next one also needs to also have 6 trailing ones
+                        let raw_kc2 = u32::read_options(reader, options, args)?;
+                        if raw_kc2.trailing_ones() != 6 {
+                            return Err(binrw::Error::AssertFail { pos: (reader.stream_position()?-4), message: String::from("Error: MemoryMap value found without surrogate value")})
+                        }
+                        Ok(Self::MemoryMap(MemoryMapAddrRo(raw_kc), MemoryMapSizeType(raw_kc2)))
+                    },
+                    7 => Ok(Self::IoMemoryMap(IoMemoryMap(raw_kc))),
+                    10=> Ok(Self::MemoryRegionMap(MemoryRegionMap(raw_kc))),
+                    11=> Ok(Self::EnableInterrupts(Interrupts(raw_kc))),
+                    13=> Ok(Self::MiscParams(MiscParams(raw_kc))),
+                    14=> Ok(Self::KernelVersion(KernelVersion(raw_kc))),
+                    15=> Ok(Self::HandleTableSize(HandleTableSize(raw_kc))),
+                    16=> Ok(Self::MiscFlags(MiscFlags(raw_kc))),
+                    _ => Ok(Self::Invalid(raw_kc))
+                }
+        }
+    }
 }
 mod aci0 {
-    use std::mem::size_of;
+    use core::mem::size_of;
 
-    use crate::utils::until_eob;
+    use crate::utils::{until_eob, Placement};
 
-    use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0, kernel_capability::{self, KernelCapability}};
+    use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0, kernel_capability::KernelCapability};
 
-    use binrw::{BinRead, FilePtr32, prelude::*, helpers::count};
+    use binrw::prelude::*;
 
     #[binread]
     #[derive(Debug)]
@@ -191,50 +270,54 @@ mod aci0 {
         pub _0x18: u64,
         pub fah_offset: u32,
         pub fah_size: u32,
-        #[br(temp)]
-        services_buffer_offset: u32,
-        #[br(temp)]
-        services_buffer_bytes: u32,
-        //#[br(calc = FilePtr32 {ptr: (services_buffer_offset + _cursor_position.0 as u32), value: None}, count = services_buffer_bytes, postprocess_now)]
-        #[br(temp, parse_with = crate::utils::Placement::parse, offset = (_cursor_position.0 + services_buffer_offset as u64) , count = services_buffer_bytes)]
+        #[br(temp)] services_buffer_offset: u32,
+        #[br(temp)] services_buffer_bytes: u32,
+        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + services_buffer_offset as u64 , count = services_buffer_bytes)]
         services_buffer: Vec<u8>,
         #[br(parse_with = until_eob(services_buffer))]
         pub services: Vec<ServiceRecord>,
-        #[br(temp)]
-        kernel_capability_buffer_offset: u32,
-        #[br(temp)]
-        kernel_capability_buffer_size: u32,
-        #[br(temp, parse_with = crate::utils::Placement::parse, offset = (_cursor_position.0 + kernel_capability_buffer_offset as u64) , count = kernel_capability_buffer_size as usize / size_of::<u32>())]
-        kernel_capability_vals: Vec<u32>,
-        #[br(calc = kernel_capability_vals.into_iter().map(KernelCapability::from).collect())]
-        kernel_capabilities: Vec<KernelCapability>,
+        #[br(temp)] kernel_capability_buffer_offset: u32,
+        #[br(temp)] kernel_capability_buffer_size: u32,
+        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + kernel_capability_buffer_offset as u64 , count = kernel_capability_buffer_size as usize)]
+        kernel_capability_buffer: Vec<u8>,
+        #[br(parse_with = until_eob(kernel_capability_buffer))]
+        pub kernel_capabilities: Vec<KernelCapability>,
         pub _padding: u64
     }
 
+    #[binread]
     #[derive(Debug)]
-    struct Fah {
-        pub version: u32,
-        pub permissions: u32,
-        pub _0xC: u32,
-        pub _0x10: u32,
-        pub _0x14: u32,
-        pub _0x18: u32
-    }
-   
-    #[derive(Debug)]
-    struct FsPermission {
-        pub name: String,
-        pub mask: u64
+    pub struct Aci0FsAccessControlRecord {
+        #[br(temp)]
+        _cursor_position: crate::utils::CurPos,
+        pub version: u8,
+        #[br(temp, count = 3)]
+        pub _padding: Vec<u8>,
+        pub access_flags: FsAccessFlags,
+        #[br(temp)] content_owner_id_buffer_offset: u32,
+        #[br(temp)] content_owner_id_buffer_size: u32,
+        #[br(parse_with = Placement::parse, offset = _cursor_position.0 + content_owner_id_buffer_offset as u64 , count = (content_owner_id_buffer_size as usize / size_of::<u64>()))]
+        pub content_owner_ids: Vec<u64>,
+        #[br(temp)] save_data_owner_id_buffer_offset: u32,
+        #[br(temp)] save_data_owner_id_buffer_size: u32,
+        #[br(parse_with = Placement::parse, offset = _cursor_position.0 + save_data_owner_id_buffer_offset as u64 , count = (save_data_owner_id_buffer_size as usize / size_of::<u64>()))]
+        pub save_data_owner_ids: Vec<u64>,
+        #[br(if(content_owner_id_buffer_offset != 0x1C))]
+        pub save_data_owner_id_count: Option<u32>
     }
 }
 use aci0::*;
 
 mod acid {
-    use binrw::{BinRead, count, FilePtr32, prelude::*};
 
+    use binrw::{BinRead, count, prelude::*};
+
+    use num_enum::{FromPrimitive, IntoPrimitive};
     use proc_bitfield::bitfield;
 
-    use super::{ServiceRecord, MAGIC_ACID};
+    use crate::utils::{until_eob, Placement};
+
+    use super::{ServiceRecord, MAGIC_ACID, kernel_capability::KernelCapability};
 
     #[binread]
     #[derive(Debug)]
@@ -248,24 +331,38 @@ mod acid {
         pub size: u32,
         pub version: u8,
         pub v14_plus: u8,
-        pub _reserved: u16,
-        pub flags: u32,
+        _reserved: u16,
+        pub flags: AcidFlags,
         pub title_id_range_min: u64,
         pub title_id_range_max: u64,
-        pub fac_offset: u32,
-        pub fac_size: u32,
-        #[br(parse_with = FilePtr32::parse, offset = _cursor_position.0)]
-        pub sac: ServiceRecord,
-        pub kac_offset: u32,
-        pub kac_size: u32,
-        pub _padding: u64
+        #[br(temp)] fac_buffer_offset: u32,
+        #[br(temp)] fac_buffer_size: u32,
+        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + fac_buffer_offset as u64 , count = fac_buffer_size)]
+        fac_buffer: Vec<u8>,
+        #[br(parse_with = until_eob(fac_buffer))]
+        pub file_access_control_entries: Vec<AcidFsAccessControlRecord>,
+        #[br(temp)] services_buffer_offset: u32,
+        #[br(temp)] services_buffer_bytes: u32,
+        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + services_buffer_offset as u64 , count = services_buffer_bytes)]
+        services_buffer: Vec<u8>,
+        #[br(parse_with = until_eob(services_buffer))]
+        pub services: Vec<ServiceRecord>,
+        #[br(temp)] kernel_capability_buffer_offset: u32,
+        #[br(temp)] kernel_capability_buffer_size: u32,
+        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + kernel_capability_buffer_offset as u64 , count = kernel_capability_buffer_size as usize)]
+        kernel_capability_buffer: Vec<u8>,
+        #[br(parse_with = until_eob(kernel_capability_buffer))]
+        pub kernel_capabilities: Vec<KernelCapability>,
+        _padding: u64
     }
 
-    #[derive(BinRead,Debug)]
-    struct AcidFsAccessControlRecord {
+    #[binread]
+    #[derive(Debug)]
+    pub struct AcidFsAccessControlRecord {
         pub version: u8,
         pub content_owner_id_count: u8,
         pub save_data_owner_id_count: u8,
+        #[br(temp)]
         pub _padding: u8,
         pub access_flags: super::FsAccessFlags,
         pub content_owner_id_min: u64,
@@ -279,29 +376,20 @@ mod acid {
     }
 
     #[repr(u8)]
-    #[derive(Debug)]
+    #[derive(Debug, FromPrimitive, IntoPrimitive)]
     pub enum MemoryRegion {
-        Application,
+        Application = 0,
         Applet,
         SecureSystem,
         NonSecureSystem,
 
+        #[default]
         Reserved
-    }
-    impl From<u8> for MemoryRegion {
-        fn from(val: u8) -> Self {
-            match val {
-                0 => MemoryRegion::Application,
-                1 => MemoryRegion::Applet,
-                2 => MemoryRegion::SecureSystem,
-                3 => MemoryRegion::NonSecureSystem,
-                _ => MemoryRegion::Reserved
-            }
-        }
     }
 
     bitfield! {
-        pub struct NpdmHeaderFlags(u32): Debug {
+        #[derive(BinRead)]
+        pub struct AcidFlags(u32): Debug {
             pub raw: u32 @ .., // access raw byte
 
             // flags
@@ -310,34 +398,24 @@ mod acid {
 
             // Process Address Space Value
             pub memory_region_raw: u8 @ 1..=3,
-            pub memory_region: u8 [get MemoryRegion] @ 2..=5,
+            pub memory_region: u8 [MemoryRegion] @ 2..=5,
         }
     }
 
 }
 use acid::*;
 
-#[derive(Debug)]
+#[derive(Debug,FromPrimitive,IntoPrimitive)]
+#[repr(u8)]
 pub enum ProcessAddressSpace {
     Address32Bit,
     Address64BitOld,
     Address64BitNoReserved,
     Address64BitNew,
 
+    #[default]
     Reserved
 }
-impl From<u8> for ProcessAddressSpace {
-    fn from(val: u8) -> Self {
-        match val {
-            0 => ProcessAddressSpace::Address32Bit,
-            1 => ProcessAddressSpace::Address64BitOld,
-            2 => ProcessAddressSpace::Address64BitNoReserved,
-            3 => ProcessAddressSpace::Address64BitNew,
-            _ => ProcessAddressSpace::Reserved
-        }
-    }
-}
-
 
 bitfield! {
     #[derive(BinRead)]
@@ -351,7 +429,7 @@ bitfield! {
 
         // Process Address Space Value
         pub address_space_raw: u8 @ 1..=3,
-        pub address_space: u8 [get ProcessAddressSpace] @ 1..=3,
+        pub address_space: u8 [ProcessAddressSpace] @ 1..=3,
     }
 }
 
@@ -382,13 +460,11 @@ pub struct NpdmFile {
 
 
 impl NpdmFile {
-    pub fn parse<P: AsRef<Path>>(npdm_file: P) -> Result<NpdmFile> {
+    pub fn parse<P: AsRef<Path>>(npdm_file: P) -> BinResult<NpdmFile> {
 
         let mut file = std::fs::File::open(npdm_file.as_ref())?;
 
-        let parsed: NpdmFile = file.read_ne()?;
-
-        Ok(parsed)
+        file.read_le()
     }
 }
 
@@ -403,7 +479,7 @@ mod tests {
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();
 
-        println!("{:#x?}", parsed.aci0);
+        println!("{:#x?}", parsed);
     }
 
 }

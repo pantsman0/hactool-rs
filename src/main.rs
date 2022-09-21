@@ -3,7 +3,7 @@ use clap::Parser;
 
 mod args;
 mod file_formats;
-mod settings;
+//mod settings;
 mod utils;
 
 fn main() {
