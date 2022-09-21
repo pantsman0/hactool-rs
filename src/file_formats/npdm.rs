@@ -1,14 +1,14 @@
-use std::path::Path;
+use std::{path::Path, io::{Read, Seek, SeekFrom}};
 
 use anyhow::Result;
-use binread::{BinRead, BinReaderExt, FilePtr32, count};
+use binrw::{BinRead, BinReaderExt, FilePtr32, count, ReadOptions};
 use proc_bitfield::bitfield;
 
-/*
-const MAGIC_META: u32 = 0x4154454D;
+
+//const MAGIC_META: u32 = 0x4154454D;
 const MAGIC_ACID: u32 = 0x44494341;
 const MAGIC_ACI0: u32 = 0x30494341;
-*/
+
 
 bitfield! {
     #[derive(BinRead)]
@@ -64,7 +64,16 @@ pub struct ServiceRecord {
     #[br(parse_with = count(usize::from(header.len() + 1u8)))]
     pub service_name: Vec<u8>
 }
+/* 
+pub struct ServiceRecords(pub Vec<ServiceRecord>);
+impl BinRead for ServiceRecords {
+    type Args = u64;
 
+    fn read_options<R: Read + Seek>(reader: &mut R, ro: &ReadOptions, args: Self::Args) -> BinResult<Self> {
+        Ok(CurPos(reader.seek(SeekFrom::Current(0))?))
+    }
+}
+*/
 bitfield!{
     #[derive(BinRead)]
     pub struct ServiceRecordHeader(u8): Debug {
@@ -75,20 +84,32 @@ bitfield!{
 }
 
 mod aci0 {
-    use super::FsAccessFlags;
+    use std::io::Cursor;
 
-    use binread::BinRead;
+    use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0};
 
-    #[derive(BinRead,Debug)]
-    #[br(magic = b"ACI0")]
+    use binrw::{BinRead, FilePtr32, prelude::*, until_eof};
+
+    #[binread]
+    #[derive(Debug)]
+    #[br(assert(magic == MAGIC_ACI0))]
     pub struct Aci0 {
+        #[br(temp)]
+        _cursor_position: crate::utils::CurPos,
+        pub magic: u32,
         pub _0x4: [u8;0xC],
         pub title_id: u64,
         pub _0x18: u64,
         pub fah_offset: u32,
         pub fah_size: u32,
-        pub sac_offset: u32,
+        #[br(temp, parse_with = FilePtr32::parse, offset = _cursor_position.0, count = sac_size)]
+        pub sac_buf: Vec<u8>,
+        #[br(temp)]
         pub sac_size: u32,
+        #[br(temp, calc = Cursor::new(sac_buf))]
+        pub sac_cusor: Cursor<Vec<u8>>,
+        #[br(parse_with = until_eof)]
+        pub services: Vec<ServiceRecord>,
         pub kac_offset: u32,
         pub kac_size: u32,
         pub _padding: u64
@@ -150,29 +171,21 @@ mod aci0 {
 use aci0::*;
 
 mod acid {
-    use binread::{BinRead, count, FilePtr32};
+    use binrw::{BinRead, count, FilePtr32, prelude::*};
 
     use proc_bitfield::bitfield;
 
-    use super::ServiceRecord;
+    use super::{ServiceRecord, MAGIC_ACID};
 
-    #[derive(BinRead,Debug)]
+    #[binread]
+    #[derive(Debug)]
+    #[br(assert(magic == MAGIC_ACID))]
     pub struct Acid {
-        pub header: AcidHeader,
-        pub record: AcidRecord
-    }
-
-    #[derive(BinRead,Debug)]
-    pub struct AcidHeader {
+        #[br(temp)]
+        _cursor_position: crate::utils::CurPos,
         pub signature: [u8;0x100],
-        pub nca_pub_key: [u8;0x100]
-    }
-
-    #[derive(BinRead, Debug)]
-    #[br( magic = b"ACID")]
-    pub struct AcidRecord {
-        //starting_position: crate::utils::CurPos,
-        //#[br(pad_before=4)]
+        pub nca_pub_key: [u8;0x100],
+        pub magic: u32,
         pub size: u32,
         pub version: u8,
         pub v14_plus: u8,
@@ -182,9 +195,9 @@ mod acid {
         pub title_id_range_max: u64,
         pub fac_offset: u32,
         pub fac_size: u32,
-        //#[br(parse_with = FilePtr32::parse, offset = starting_position.0)]
-        //pub sac_offset: ServiceRecord,
-        pub sac_offset: u32,
+        #[br(parse_with = FilePtr32::parse, offset = _cursor_position.0)]
+        pub sac: ServiceRecord,
+        //pub sac_offset: u32,
         pub sac_size: u32,
         pub kac_offset: u32,
         pub kac_size: u32,
@@ -333,7 +346,7 @@ mod tests {
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();
 
-        println!("{:x?}", parsed.aci0);
+        println!("{:x?}", parsed.acid);
     }
 
 }
