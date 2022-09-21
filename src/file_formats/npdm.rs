@@ -1,7 +1,7 @@
 use std::{path::Path, io::{Read, Seek, SeekFrom}};
 
 use anyhow::Result;
-use binrw::{BinRead, BinReaderExt, FilePtr32, count, ReadOptions};
+use binrw::{BinRead, BinReaderExt, FilePtr32, count, ReadOptions, FixedLenString};
 use proc_bitfield::bitfield;
 
 
@@ -61,19 +61,9 @@ bitfield! {
 #[derive(BinRead,Debug)]
 pub struct ServiceRecord {
     pub header: ServiceRecordHeader,
-    #[br(parse_with = count(usize::from(header.len() + 1u8)))]
-    pub service_name: Vec<u8>
+    #[br(args(usize::from(header.len()) + 1usize))]
+    pub service_name: FixedLenString
 }
-/* 
-pub struct ServiceRecords(pub Vec<ServiceRecord>);
-impl BinRead for ServiceRecords {
-    type Args = u64;
-
-    fn read_options<R: Read + Seek>(reader: &mut R, ro: &ReadOptions, args: Self::Args) -> BinResult<Self> {
-        Ok(CurPos(reader.seek(SeekFrom::Current(0))?))
-    }
-}
-*/
 bitfield!{
     #[derive(BinRead)]
     pub struct ServiceRecordHeader(u8): Debug {
@@ -83,38 +73,32 @@ bitfield!{
     }
 }
 
-mod aci0 {
-    use std::io::Cursor;
+mod kernel_capability {
+    use proc_bitfield::bitfield;
 
-    use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0};
-
-    use binrw::{BinRead, FilePtr32, prelude::*, until_eof};
-
-    #[binread]
     #[derive(Debug)]
-    #[br(assert(magic == MAGIC_ACI0))]
-    pub struct Aci0 {
-        #[br(temp)]
-        _cursor_position: crate::utils::CurPos,
-        pub magic: u32,
-        pub _0x4: [u8;0xC],
-        pub title_id: u64,
-        pub _0x18: u64,
-        pub fah_offset: u32,
-        pub fah_size: u32,
-        #[br(temp, parse_with = FilePtr32::parse, offset = _cursor_position.0, count = sac_size)]
-        pub sac_buf: Vec<u8>,
-        #[br(temp)]
-        pub sac_size: u32,
-        #[br(temp, calc = Cursor::new(sac_buf))]
-        pub sac_cusor: Cursor<Vec<u8>>,
-        #[br(parse_with = until_eof)]
-        pub services: Vec<ServiceRecord>,
-        pub kac_offset: u32,
-        pub kac_size: u32,
-        pub _padding: u64
+    pub enum KernelCapability {
+        ThreadInfo(ThreadInfo),
+        EnableSystemCalls(SystemCalls),
+        MemoryMap(MemoryMap),
+        IoMemoryMap(IoMemoryMap),
+        MemoryRegionMap(MemoryRegionMap),
+        EnableInterupts(Interupts),
+        MiscParams(MiscParams),
+        KernelVersion(KernelVersion),
+        HandleTableSize(HandleTableSize),
+        MiscFlags(MiscFlags),
+        Invalid
     }
 
+    impl From<u32> for KernelCapability {
+        fn from(val: u32) -> Self {
+            match val.trailing_ones() {
+                3 => {Self::ThreadInfo(ThreadInfo{})},
+                _ => Self::Invalid
+            }
+        }
+    }
     #[derive(Debug)]
     struct KacMmioRecord {
         pub address: u64,
@@ -150,6 +134,81 @@ mod aci0 {
         pub has_debug_flags: bool,
         pub allow_debug: bool,
         pub force_debug: bool
+    }
+
+    bitfield! {
+        pub struct ThreadInfo(u32): Debug {
+            pub raw: u32 @ ..,
+            pub lowest_thread_priority: u8 @ 4..=9,
+            pub hightest_thread_priority: u8@ 10..=15,
+            pub lowest_cpu_id: u8 @ 16..=23,
+            pub highest_cpu_id: u8 @ 24..=31,
+        }
+    }
+    bitfield!{
+        pub struct SystemCalls(u32): Debug {
+            pub raw: u32 @ ..,
+            pub syscall_id: i32 @ 5..=28,
+            pub index: u8 @ 29..=31
+        }
+    }
+    bitfield!{
+        pub struct MemoryMap(u32, u32): Debug {}
+    }   
+     #[derive(Debug)]
+    pub struct IoMemoryMap;
+    #[derive(Debug)]
+    pub struct MemoryRegionMap;
+    #[derive(Debug)]
+    pub struct Interupts;
+    #[derive(Debug)]
+    pub struct MiscParams;
+    #[derive(Debug)]
+    pub struct KernelVersion;
+    #[derive(Debug)]
+    pub struct HandleTableSize;
+    #[derive(Debug)]
+    pub struct MiscFlags;
+}
+mod aci0 {
+    use std::mem::size_of;
+
+    use crate::utils::until_eob;
+
+    use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0, kernel_capability::{self, KernelCapability}};
+
+    use binrw::{BinRead, FilePtr32, prelude::*, helpers::count};
+
+    #[binread]
+    #[derive(Debug)]
+    #[br(assert(magic == MAGIC_ACI0))]
+    pub struct Aci0 {
+        #[br(temp)]
+        _cursor_position: crate::utils::CurPos,
+        pub magic: u32,
+        pub _0x4: [u8;0xC],
+        pub title_id: u64,
+        pub _0x18: u64,
+        pub fah_offset: u32,
+        pub fah_size: u32,
+        #[br(temp)]
+        services_buffer_offset: u32,
+        #[br(temp)]
+        services_buffer_bytes: u32,
+        //#[br(calc = FilePtr32 {ptr: (services_buffer_offset + _cursor_position.0 as u32), value: None}, count = services_buffer_bytes, postprocess_now)]
+        #[br(temp, parse_with = crate::utils::Placement::parse, offset = (_cursor_position.0 + services_buffer_offset as u64) , count = services_buffer_bytes)]
+        services_buffer: Vec<u8>,
+        #[br(parse_with = until_eob(services_buffer))]
+        pub services: Vec<ServiceRecord>,
+        #[br(temp)]
+        kernel_capability_buffer_offset: u32,
+        #[br(temp)]
+        kernel_capability_buffer_size: u32,
+        #[br(temp, parse_with = crate::utils::Placement::parse, offset = (_cursor_position.0 + kernel_capability_buffer_offset as u64) , count = kernel_capability_buffer_size as usize / size_of::<u32>())]
+        kernel_capability_vals: Vec<u32>,
+        #[br(calc = kernel_capability_vals.into_iter().map(KernelCapability::from).collect())]
+        kernel_capabilities: Vec<KernelCapability>,
+        pub _padding: u64
     }
 
     #[derive(Debug)]
@@ -197,8 +256,6 @@ mod acid {
         pub fac_size: u32,
         #[br(parse_with = FilePtr32::parse, offset = _cursor_position.0)]
         pub sac: ServiceRecord,
-        //pub sac_offset: u32,
-        pub sac_size: u32,
         pub kac_offset: u32,
         pub kac_size: u32,
         pub _padding: u64
@@ -346,7 +403,7 @@ mod tests {
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();
 
-        println!("{:x?}", parsed.acid);
+        println!("{:#x?}", parsed.aci0);
     }
 
 }
