@@ -1,8 +1,14 @@
-use std::path::Path;
+use std::{path::Path, io::Cursor};
 
-use binrw::{BinRead, BinReaderExt, FilePtr32, FixedLenString, BinResult};
+use binrw::{BinRead, BinReaderExt, FilePtr32, BinResult, binread};
 use num_enum::{FromPrimitive, IntoPrimitive};
 use proc_bitfield::bitfield;
+use rsa::{RsaPublicKey, pss::{VerifyingKey, Signature}};
+use sha2::Sha256;
+use signature::Verifier;
+
+use crate::utils::{Placement, until_eob};
+use super::Validity;
 
 
 //const MAGIC_META: u32 = 0x4154454D;
@@ -61,8 +67,8 @@ bitfield! {
 #[derive(BinRead,Debug)]
 pub struct ServiceRecord {
     pub header: ServiceRecordHeader,
-    #[br(args(usize::from(header.len()) + 1usize))]
-    pub service_name: FixedLenString
+    #[br(count = header.len())]
+    pub service_name: Vec<u8>
 }
 bitfield!{
     #[derive(BinRead)]
@@ -326,7 +332,7 @@ mod acid {
         #[br(temp)]
         _cursor_position: crate::utils::CurPos,
         pub signature: [u8;0x100],
-        pub nca_pub_key: [u8;0x100],
+        pub modulus: [u8;0x100],
         pub magic: u32,
         pub size: u32,
         pub version: u8,
@@ -433,29 +439,37 @@ bitfield! {
     }
 }
 
-
-#[derive(BinRead,Debug)]
+#[binread]
+#[derive(Debug)]
 #[br(magic = b"META")]
 pub struct NpdmFile {
     pub acid_sign_key_index: u32,
-    pub _0x8: u32,
+    #[br(temp)]
+    _0x8: u32,
     pub flags: NpdmHeaderFlags,
-    pub _0x_d: u8,
+    #[br(temp)]
+    pub _0xd: u8,
     pub main_thread_priority: u8,
     pub default_cpu_core: u8,
-    pub _0x10: u32,
+    #[br(temp)]
+    _0x10: u32,
     pub system_resource_size: u32,
     pub version:u32,
     pub main_stack_size: u32,
     pub title_name: [u8;0x10],
     pub product_code: [u8;0x10],
-    pub _0x40: [u8;0x30],
+    #[br(temp)]
+    _0x40: [u8;0x30],
     #[br(parse_with = FilePtr32::parse)]
     pub aci0: Aci0,
     pub aci0_size: u32,
-    #[br(parse_with = FilePtr32::parse)]
-    pub acid: Acid,
-    pub acid_size: u32
+    #[br(temp)]
+    acid_ptr: u32,
+    pub acid_size: u32,
+    #[br(parse_with = Placement::parse, offset = acid_ptr as u64, count = acid_size)]
+    pub acid_raw: Vec<u8>,
+    #[br(calc = Cursor::new(acid_raw.clone()).read_le()?)]
+    pub acid: Acid
 }
 
 
@@ -466,20 +480,38 @@ impl NpdmFile {
 
         file.read_le()
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    pub fn verify_with_hex_str(&self, verification_key_modulus: String) -> Result<Validity, Validity> {
+        if let Some(modulus_bigint) = rsa::BigUint::from_radix_le(verification_key_modulus.as_bytes(), 16) {
+            let exponent = rsa::BigUint::from_bytes_le([1u8,0, 1].as_slice());
+            if let Ok(rsa_pubkey) = rsa::RsaPublicKey::new(modulus_bigint, exponent){
+                let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);
+                let signature: Signature = Vec::from(self.acid.signature.as_slice()).into();
+                let valid = verifying_key.verify(self.acid_raw.split_at(0x200).1 , &signature).is_ok();
 
-    #[test]
-    pub fn parse_test_ndpm() {
-        let path: std::path::PathBuf = vec!["test_files", "main.npdm"].iter().collect();
-        let parsed = NpdmFile::parse(path);
-        assert!(parsed.is_ok());
-        let parsed = parsed.unwrap();
-
-        println!("{:#x?}", parsed);
+                return if valid { Ok(Validity::Valid)} else {Ok(Validity::Invalid)};
+            } else {
+                return  Err(Validity::CheckError);
+            }
+        } 
+        return Err(Validity::CheckError);
     }
 
+    pub fn verify(&self, verification_key_modulus: &[u8]) -> Result<Validity, Validity> {
+        let modulus_bigint = rsa::BigUint::from_bytes_be(verification_key_modulus);
+        let exponent = rsa::BigUint::from_bytes_be([1,0,1].as_slice());
+        let rsa_pubkey = rsa::RsaPublicKey::new(modulus_bigint, exponent).map_err(|_| Validity::CheckError)?;
+        let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);
+        let signature: Signature = Vec::from(self.acid.signature.as_slice()).into();
+        let data = self.acid_raw.split_at(0x100).1;
+        println!("{:?}",data.len());
+        let validity = verifying_key.verify(data, &signature);
+
+        println!("{:?}", validity);
+        return if validity.is_ok() { 
+            Ok(Validity::Valid)
+        } else {
+            Ok(Validity::Invalid)
+        };
+    }
 }

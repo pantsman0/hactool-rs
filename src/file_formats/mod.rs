@@ -3,9 +3,10 @@ pub mod npdm;
 //pub mod pfs0;
 
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq, Eq)]
 pub enum Validity {
     Unchecked,
     Invalid,
-    Valid
+    Valid,
+    CheckError
 }
