@@ -3,11 +3,11 @@ use std::{path::Path, io::Cursor};
 use binrw::{BinRead, BinReaderExt, FilePtr32, BinResult, binread};
 use num_enum::{FromPrimitive, IntoPrimitive};
 use proc_bitfield::bitfield;
-use rsa::{RsaPublicKey, pss::{VerifyingKey, Signature}};
+use rsa:: pss::{VerifyingKey, Signature};
 use sha2::Sha256;
 use signature::Verifier;
 
-use crate::utils::{Placement, until_eob};
+use crate::{utils::Placement, keys::KeysetType};
 use super::Validity;
 
 
@@ -497,8 +497,13 @@ impl NpdmFile {
         return Err(Validity::CheckError);
     }
 
-    pub fn verify(&self, verification_key_modulus: &[u8]) -> Result<Validity, Validity> {
-        let modulus_bigint = rsa::BigUint::from_bytes_be(verification_key_modulus);
+    pub fn verify_acid(&self, key_type: KeysetType) -> Result<Validity, Validity> {
+        if self.acid_sign_key_index > 1 { return Err(Validity::Invalid); }
+        let acid_sign_key = match key_type {
+            KeysetType::Retail => crate::keys::constants::retail_keys::ACID_FIXED_KEY_MODULI[self.acid_sign_key_index as usize],
+            KeysetType::Dev => crate::keys::constants::development_keys::ACID_FIXED_KEY_MODULI[self.acid_sign_key_index as usize]
+        };
+        let modulus_bigint = rsa::BigUint::from_bytes_be(acid_sign_key.as_slice());
         let exponent = rsa::BigUint::from_bytes_be([1,0,1].as_slice());
         let rsa_pubkey = rsa::RsaPublicKey::new(modulus_bigint, exponent).map_err(|_| Validity::CheckError)?;
         let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);

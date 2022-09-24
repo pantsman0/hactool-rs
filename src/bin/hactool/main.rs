@@ -5,8 +5,6 @@ mod args;
 
 use args::Args;
 
-use rsa::{BigUint, pss::VerifyingKey};
-use sha2::Sha256;
 
 fn main() {
     //let pubkey_test()
