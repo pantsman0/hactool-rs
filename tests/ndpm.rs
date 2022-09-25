@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[test]
 pub fn parse_test_ndpm() {
-    let path: PathBuf = vec!["test_files", "main.npdm"].iter().collect();
+    let path: PathBuf = vec!["test_files", "test.npdm"].iter().collect();
     let parsed = NpdmFile::parse(path);
     assert!(parsed.is_ok());
     let parsed = parsed.unwrap();
