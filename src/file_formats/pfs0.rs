@@ -1,3 +1,4 @@
+use std::io::Seek;
 use std::path::Path;
 
 use binrw::prelude::*;
@@ -9,10 +10,15 @@ use crate::utils::Placement;
 
 const MAGIC_PFS0: u32 = 0x30534650;
 
+pub struct Pfs0File {
+    file: &mut File,
+    pub pfs0: Pfs0
+}
+
 #[binread]
 #[derive(Debug)]
 #[br(assert(magic == MAGIC_PFS0))]
-pub struct Pfs0File {
+pub struct Pfs0 {
     /// Embed current cursor position since the PFS0 may be embedded in an NCA file
     #[br(temp)] _cursor_position: crate::utils::CurPos,
     /// "PFS0" magic value
@@ -45,33 +51,19 @@ pub struct Pfs0FileEntry {
     #[br(parse_with = Placement::parse, offset = file_offset, count = file_size)]
     pub file_data: Vec<u8>,
 }
-/*
-struct Pfs0Superblock {
-    pub master_hash: [u8;0x20],
-    pub block_size: u32,
-    pub _always2: u32,
-    pub hash_table_offset: u64,
-    pub hash_table_size: u64,
-    pub pfs0_offset: u64,
-    pub pfs0_size: u64,
-    pub _reserved: [u8;0xF0]
-}
 
-struct Pfs0Context<'context> {
-    pub superblock: &'context Pfs0Superblock,
-    pub file: std::fs::File,
-    pub superblock_hash_validity: Validity,
-    pub hash_table_validity: Validity,
-    pub is_exefs: bool,
-    pub npdm: (),
-    pub header: Pfs0Header
-}
- */
+
 
 impl Pfs0File {
     pub fn parse<P: AsRef<Path>>(pfs0_file: P) -> BinResult<Pfs0File> {
-        let mut file = std::fs::File::open(pfs0_file.as_ref())?;
+        let &mut file = std::fs::File::open(pfs0_file.as_ref())?;
 
-        file.read_le()
+        pfs0 = file.read_le()?;
+        file.rewind();
+
+        Ok(Pfs0File {
+            file,
+            pfs0
+        })
     }
 }

@@ -205,7 +205,8 @@ pub mod fs {
         pub secure_value: u32,
         pub sparse_info: SparseInfo,
         pub compression_info: Option<CompressionInfo>,
-        pub metadata_hash: MetadataHashInfo
+        pub metadata_hash: MetadataHashInfo,
+        #[br(temp)] _0x1d0: [u8;0x30]
     }
 
     mod fs_patch {
@@ -233,12 +234,12 @@ pub mod fs {
             pub vfs_image_size: u64,
             pub bucket_virtual_offsets: [u64; 0x7fe],
             #[br(count = bucket_count)]
-            pub relocation_buckets: Vec<RelocationBucket>
+            pub relocation_buckets: Vec<DataBucket>
         }
 
         #[binread]
         #[derive(Debug)]
-        struct RelocationBucket {
+        struct DataBucket {
             #[br(temp)] _0x0: u32,
             pub entry_count: u32,
             pub bucket_end_offset: u64,
