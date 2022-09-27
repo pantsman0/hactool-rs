@@ -136,7 +136,7 @@ pub mod fs {
     #[binread]
     #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
     #[br(repr = u8)]
-    pub enum FsType {
+    pub enum EncryptionType {
         Auto,
         None,
         AesXts,
@@ -157,22 +157,38 @@ pub mod fs {
 
     #[binread]
     #[derive(Debug)]
-    pub struct PatchInfo {
-        pub indirect_offset: u64,
-        pub indirect_size: u64,
-        pub indirect_header: BucketTreeHeader,
-        pub aes_offset: u64,
-        pub aes_size: u64,
-        pub aes_header: AesCtrExHeader
-    }
-
-    #[binread]
-    #[derive(Debug)]
     #[br(magic = b"BKTR")]
     pub struct BucketTreeHeader {
         pub version: u32,
         pub entry_count: u64,
         #[br(temp)] _0xc: u64
+    }
+
+    #[binread]
+    #[derive(Debug)]
+    pub struct SparseInfo {
+        pub table_offset: u64,
+        pub table_size: u64,
+        pub table_header: BucketTreeHeader,
+        pub physical_offset: u64,
+        #[br(temp)] _0x20: [u8;0x8]
+    }
+
+    #[binread]
+    #[derive(Debug)]
+    pub struct CompressionInfo {
+        pub compression_table_offset: u64,
+        pub compression_table_size: u64,
+        pub container_header: BucketTreeHeader,
+        #[br(temp)] _0xc: u64
+    }
+
+    #[binread]
+    #[derive(Debug)]
+    pub struct MetadataHashInfo {
+        pub table_offset: u64,
+        pub table_size: u64,
+        pub table_hash: [u8;0x20] // SHA256?
     }
 
     #[binread]
@@ -184,7 +200,69 @@ pub mod fs {
         pub metadata_hash_type: MetadataHashType,
         #[br(temp)] _0x6: u16,
         pub hash_data: [u8;0xF8], //TODO: struct
-        pub patch_info: PatchInfo,
+        //pub patch_info: fs_patch::PatchInfoPtr,
+        pub generation: u32,
+        pub secure_value: u32,
+        pub sparse_info: SparseInfo,
+        pub compression_info: Option<CompressionInfo>,
+        pub metadata_hash: MetadataHashInfo
+    }
+
+    mod fs_patch {
+        use binrw::prelude::*;
+        use num_enum::{TryFromPrimitive, IntoPrimitive};
+
+        use super::BucketTreeHeader;
+
+        #[binread]
+        #[derive(Debug)]
+        pub struct RawPatchHeader {
+            pub indirect_offset: u64,
+            pub indirect_size: u64,
+            pub indirect_header: BucketTreeHeader,
+            pub aes_offset: u64,
+            pub aes_size: u64,
+            pub aes_header: BucketTreeHeader
+        }
+
+        #[binread]
+        #[derive(Debug)]
+        struct PatchEntry {
+            #[br(temp)] _0x0: u32,
+            pub bucket_count: u32,
+            pub vfs_image_size: u64,
+            pub bucket_virtual_offsets: [u64; 0x7fe],
+            #[br(count = bucket_count)]
+            pub relocation_buckets: Vec<RelocationBucket>
+        }
+
+        #[binread]
+        #[derive(Debug)]
+        struct RelocationBucket {
+            #[br(temp)] _0x0: u32,
+            pub entry_count: u32,
+            pub bucket_end_offset: u64,
+            #[br(count = entry_count)]
+            pub relocation_entries: Vec<RelocationEntry>
+        }
+
+        #[repr(u8)]
+        #[binread]
+        #[br(repr = u8)]
+        #[derive(Debug,TryFromPrimitive,IntoPrimitive)]
+        pub enum RelocationDirection {
+            FromBase,
+            FromPatch
+        }
+
+        #[binread]
+        #[derive(Debug)]
+        struct RelocationEntry {
+            pub dest_romfs_addr: u64,
+            pub source_romfs_addr: u64,
+            pub direction: RelocationDirection
+        }
+
 
     }
 }
