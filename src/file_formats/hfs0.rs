@@ -44,7 +44,7 @@ pub struct Hfs0FileEntry {
     /// Padding
     #[br(temp)] _0x18: u32,
     /// SHA256 hash of the first `hashed_prefix_len` bytes of the embedded file
-    pub file_prefix_hash: [u8;0x20],
+    pub file_prefix_hash: super::SHA256Hash,
     /// File Data
     #[br(parse_with = Placement::parse, offset = file_offset, count = file_size)]
     pub file_data: Vec<u8>,
