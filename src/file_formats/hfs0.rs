@@ -11,7 +11,7 @@ const MAGIC_HFS0:u32 = 0x30534648;
 
 #[binread]
 #[derive(Debug)]
-#[br(assert(magic == MAGIC_HFS0))]
+#[br(little, assert(magic == MAGIC_HFS0))]
 pub struct Hfs0 {
     /// Embed current cursor position since the HFS0 structure is embedded in a file
     #[br(temp)] _cursor_position: crate::utils::CurPos,
@@ -20,9 +20,7 @@ pub struct Hfs0 {
     /// number of embedded files
     #[br(temp)] file_count: u32,
     /// size of the file name string buffer in bytes
-    #[br(temp)] string_table_byte_size: u32,
-    /// Padding
-    #[br(temp)] _0xc: u32,
+    #[br(temp, pad_after = 4)] string_table_byte_size: u32,
     /// Embedded file entries
     #[br(count = file_count, args { inner: (_cursor_position.0 /* HFS0 start position */ + 0x10 /* Offset of file entries */ + u64::from(file_count)*0x40 /* Size of file entry table */,)})]
     pub files: Vec<Hfs0FileEntry>,
@@ -30,7 +28,7 @@ pub struct Hfs0 {
 
 #[binread]
 #[derive(Debug)]
-#[br(import(string_table_offset: u64))]
+#[br(little, import(string_table_offset: u64))]
 pub struct Hfs0FileEntry {
     /// Offset of file from HFS0 header start
     #[br(temp)] file_offset: u64,

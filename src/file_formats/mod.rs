@@ -1,3 +1,4 @@
+pub mod hfs0;
 pub mod nca;
 pub mod npdm;
 pub mod pfs0;

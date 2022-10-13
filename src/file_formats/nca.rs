@@ -8,7 +8,7 @@ use super::SHA256Hash;
 
 #[repr(u32)]
 #[binread]
-#[br(repr = u32)]
+#[br(little, repr = u32)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
 pub enum NcaVersion {
     Nca0 = 0x3041434E,
@@ -18,7 +18,7 @@ pub enum NcaVersion {
 
 #[repr(u8)]
 #[binread]
-#[br(repr = u8)]
+#[br(little, repr = u8)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
 pub enum DistributionType {
     Download,
@@ -27,7 +27,7 @@ pub enum DistributionType {
 
 #[repr(u8)]
 #[binread]
-#[br(repr = u8)]
+#[br(little, repr = u8)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
 pub enum ContentType {
     Program,
@@ -40,7 +40,7 @@ pub enum ContentType {
 
 #[repr(u8)]
 #[binread]
-#[br(repr = u8)]
+#[br(little, repr = u8)]
 #[derive(Debug, Default, FromPrimitive, IntoPrimitive)]
 pub enum KeyGeneration {
     OldOne = 0,
@@ -65,7 +65,7 @@ pub enum KeyGeneration {
 
 #[repr(u8)]
 #[binread]
-#[br(repr = u8)]
+#[br(little, repr = u8)]
 #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
 pub enum KeyAreaIndex {
     Application,
@@ -125,7 +125,7 @@ pub mod fs {
 
     #[repr(u8)]
     #[binread]
-    #[br(repr = u8)]
+    #[br(little, repr = u8)]
     #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
     pub enum FsType {
         RomFs,
@@ -135,7 +135,7 @@ pub mod fs {
     #[repr(u8)]
     #[binread]
     #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
-    #[br(repr = u8)]
+    #[br(little, repr = u8)]
     pub enum EncryptionType {
         Auto,
         None,
@@ -149,7 +149,7 @@ pub mod fs {
     #[repr(u8)]
     #[binread]
     #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
-    #[br(repr = u8)]
+    #[br(little, repr = u8)]
     pub enum MetadataHashType  {
         None,
         HierarchicalIntegrity
@@ -157,7 +157,7 @@ pub mod fs {
 
     #[binread]
     #[derive(Debug)]
-    #[br(magic = b"BKTR")]
+    #[br(little, magic = b"BKTR")]
     pub struct BucketTreeHeader {
         pub version: u32,
         pub entry_count: u64,
@@ -205,8 +205,7 @@ pub mod fs {
         pub secure_value: u32,
         pub sparse_info: SparseInfo,
         pub compression_info: Option<CompressionInfo>,
-        pub metadata_hash: MetadataHashInfo,
-        #[br(temp)] _0x1d0: [u8;0x30]
+        pub metadata_hash: MetadataHashInfo
     }
 
     mod fs_patch {
@@ -234,12 +233,12 @@ pub mod fs {
             pub vfs_image_size: u64,
             pub bucket_virtual_offsets: [u64; 0x7fe],
             #[br(count = bucket_count)]
-            pub relocation_buckets: Vec<DataBucket>
+            pub relocation_buckets: Vec<RelocationBucket>
         }
 
         #[binread]
         #[derive(Debug)]
-        struct DataBucket {
+        struct RelocationBucket {
             #[br(temp)] _0x0: u32,
             pub entry_count: u32,
             pub bucket_end_offset: u64,
@@ -249,7 +248,7 @@ pub mod fs {
 
         #[repr(u8)]
         #[binread]
-        #[br(repr = u8)]
+        #[br(little, repr = u8)]
         #[derive(Debug,TryFromPrimitive,IntoPrimitive)]
         pub enum RelocationDirection {
             FromBase,

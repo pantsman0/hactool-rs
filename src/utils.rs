@@ -1,8 +1,9 @@
-use std::io::{Read, Seek, SeekFrom, Cursor};
+use std::{io::{Read, Seek, SeekFrom, Cursor}, marker::PhantomData, process::Output};
 
-use binrw::{BinRead, ReadOptions, BinResult, helpers::until_eof, file_ptr::IntoSeekFrom, FilePtr};
+use binrw::{prelude::*, ReadOptions, until_eof, file_ptr::IntoSeekFrom, FilePtr};
+use clap::Args;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct CurPos(pub u64);
 
 impl BinRead for CurPos {
@@ -38,3 +39,14 @@ impl IntoSeekFrom for DummySeekFrom {
 }
 
 pub(crate)type Placement<T> = FilePtr<DummySeekFrom, T>;
+
+pub(crate) fn read_restore<R: Read + Seek, T: From<Vec<u8>>>(reader: &mut R, offset: u64, byte_count:u64) -> std::io::Result<T> {
+    let mut output = Vec::with_capacity(byte_count as usize);
+
+    let restore_position = reader.stream_position()?;
+    reader.seek(SeekFrom::Start(offset))?;
+    reader.read_exact(&mut output.as_mut_slice())?;
+    reader.seek(SeekFrom::Start(restore_position))?;
+
+    return Ok(output.into());
+}

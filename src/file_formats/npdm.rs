@@ -266,7 +266,7 @@ mod aci0 {
 
     #[binread]
     #[derive(Debug)]
-    #[br(assert(magic == MAGIC_ACI0))]
+    #[br(little, assert(magic == MAGIC_ACI0))]
     pub struct Aci0 {
         #[br(temp)]
         _cursor_position: crate::utils::CurPos,
@@ -316,7 +316,7 @@ use aci0::*;
 
 mod acid {
 
-    use binrw::{BinRead, count, prelude::*};
+    use binrw::prelude::*;
 
     use num_enum::{FromPrimitive, IntoPrimitive};
     use proc_bitfield::bitfield;
@@ -327,7 +327,7 @@ mod acid {
 
     #[binread]
     #[derive(Debug)]
-    #[br(assert(magic == MAGIC_ACID))]
+    #[br(little, assert(magic == MAGIC_ACID))]
     pub struct Acid {
         #[br(temp)]
         _cursor_position: crate::utils::CurPos,
@@ -336,8 +336,8 @@ mod acid {
         pub magic: u32,
         pub size: u32,
         pub version: u8,
+        #[brw(pad_after = 2)]
         pub v14_plus: u8,
-        _reserved: u16,
         pub flags: AcidFlags,
         pub title_id_range_min: u64,
         pub title_id_range_max: u64,
@@ -357,9 +357,8 @@ mod acid {
         #[br(temp)] kernel_capability_buffer_size: u32,
         #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + kernel_capability_buffer_offset as u64 , count = kernel_capability_buffer_size as usize)]
         kernel_capability_buffer: Vec<u8>,
-        #[br(parse_with = until_eob(kernel_capability_buffer))]
-        pub kernel_capabilities: Vec<KernelCapability>,
-        _padding: u64
+        #[br(parse_with = until_eob(kernel_capability_buffer), pad_after = 8)]
+        pub kernel_capabilities: Vec<KernelCapability>
     }
 
     #[binread]
@@ -367,17 +366,16 @@ mod acid {
     pub struct AcidFsAccessControlRecord {
         pub version: u8,
         pub content_owner_id_count: u8,
+        #[brw(pad_after = 1)]
         pub save_data_owner_id_count: u8,
-        #[br(temp)]
-        pub _padding: u8,
         pub access_flags: super::FsAccessFlags,
         pub content_owner_id_min: u64,
         pub content_owner_id_max: u64,
         pub save_data_owner_min: u64,
         pub save_data_owner_max: u64,
-        #[br(parse_with = count(content_owner_id_count as usize))]
+        #[br(count = content_owner_id_count as usize)]
         pub content_owner_ids: Vec<u64>,
-        #[br(parse_with = count(save_data_owner_id_count as usize))]
+        #[br(count = save_data_owner_id_count as usize)]
         pub save_data_owner_ids: Vec<u64>
     }
 
@@ -441,33 +439,30 @@ bitfield! {
 
 #[binread]
 #[derive(Debug)]
-#[br(magic = b"META")]
+#[br(little, magic = b"META")]
 pub struct NpdmFile {
+    #[brw(pad_after = 4)]
     pub acid_sign_key_index: u32,
-    #[br(temp)]
-    _0x8: u32,
+    #[brw(pad_after = 1)]
     pub flags: NpdmHeaderFlags,
-    #[br(temp)]
-    pub _0xd: u8,
     pub main_thread_priority: u8,
+    #[brw(pad_after = 4)]
     pub default_cpu_core: u8,
-    #[br(temp)]
-    _0x10: u32,
     pub system_resource_size: u32,
     pub version:u32,
     pub main_stack_size: u32,
     pub title_name: [u8;0x10],
+    #[brw(pad_after = 0x30)]
     pub product_code: [u8;0x10],
-    #[br(temp)]
-    _0x40: [u8;0x30],
     #[br(parse_with = FilePtr32::parse)]
     pub aci0: Aci0,
     pub aci0_size: u32,
     #[br(temp)]
     acid_ptr: u32,
-    pub acid_size: u32,
+    #[br(temp)]
+    acid_size: u32,
     #[br(parse_with = Placement::parse, offset = acid_ptr as u64, count = acid_size)]
-    pub acid_raw: Vec<u8>,
+    acid_raw: Vec<u8>,
     #[br(calc = Cursor::new(acid_raw.clone()).read_le()?)]
     pub acid: Acid
 }

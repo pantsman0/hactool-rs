@@ -1,95 +1,109 @@
-use std::borrow::BorrowMut;
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::Cursor;
+use std::io::Result;
 use std::path::Path;
 
 use binrw::prelude::*;
+use binrw::BinReaderExt;
 use binrw::FilePtr32;
 use binrw::NullString;
+use memmap::Mmap;
 
-use crate::file_formats::Validity;
-use crate::utils::Placement;
-
-const MAGIC_PFS0: u32 = 0x30534650;
-
-pub struct Pfs0Reader<'reader, R: Read + Seek> {
-    reader: &'reader mut R,
-    pub pfs0: Pfs0,
-}
+use crate::utils::CurPos;
+use crate::utils::read_restore;
 
 #[binread]
 #[derive(Debug)]
-#[br(assert(magic == MAGIC_PFS0))]
 pub struct Pfs0 {
-    /// Embed current cursor position since the PFS0 may be embedded in an NCA file
-    #[br(temp)]
-    _cursor_position: crate::utils::CurPos,
-    /// "PFS0" magic value
-    #[br(temp)]
-    magic: u32,
-    /// number of embedded files
-    #[br(temp)]
-    file_count: u32,
-    /// size of the file name string buffer in bytes
-    #[br(temp)]
-    string_table_byte_size: u32,
-    /// Padding
-    #[br(temp)]
-    _0xc: u32,
+    /// Pfs0 header
+    pub header: Pfs0Header,
     /// Embedded file entries
-    #[br(count = file_count, args { inner: (_cursor_position.0 /* PFS0 start position */ + 0x10 /* Offset of file entries */ + u64::from(file_count)*0x18 /* Size of file entry table */,)})]
+    #[br(count = header.file_count, args { inner: (header,)})]
     pub files: Vec<Pfs0FileRecord>,
 }
 
 #[binread]
-#[derive(Debug)]
-#[br(import(string_table_offset: u64))]
-pub struct Pfs0FileRecord {
-    /// Offset of file from PFS0 header start
-    #[br(temp)]
-    file_offset: u64,
-    /// Size of the file in bytes
-    #[br(temp)]
-    file_size: u64,
-    /// Embedded file path
-    #[br(parse_with = FilePtr32::parse, offset = string_table_offset)]
-    pub file_name: NullString,
-    /// Padding
-    #[br(temp)]
-    _0x14: u32,
-    /// File Data
-    #[br(parse_with = Placement::parse, offset = file_offset, count = file_size)]
-    pub file_data: Vec<u8>,
+#[derive(Debug, Clone, Copy)]
+#[br(little, magic = b"PFS0")]
+pub struct Pfs0Header {
+    /// Embed current cursor position since the PFS0 may be embedded in an NCA file
+    pub(crate) cursor_position: crate::utils::CurPos,
+    /// number of embedded files
+    pub file_count: u32,
+    /// size of the file name string buffer in bytes
+    #[br(pad_after = 4)]
+    pub string_table_byte_size: u32,
 }
 
 #[binread]
 #[derive(Debug)]
-pub struct Pfs0File {
-    
+#[br(little, import(pfs_header: Pfs0Header))]
+pub struct Pfs0FileRecord {
+    /// Offset and size of file from PFS0 header start
+    #[br(temp)]
+    pfs_relative_offset: u64,
+    #[br(calc = pfs_relative_offset + pfs_header.cursor_position.0)]
+    pub file_offset: u64,
+    pub file_size: u64,
+    /// Embedded file path
+    #[br(parse_with = FilePtr32::parse, pad_after = 4, offset = pfs_header.cursor_position.0 /* PFS0 start position */ + 0x10 /* Offset of file entries */ + u64::from(pfs_header.file_count)*0x18 /* Size of file entry table */)]
+    pub file_name: NullString,
 }
 
-impl Pfs0Reader<'_, _> {
-    pub fn parse_file<'file, P: AsRef<Path>>(pfs0_file: P) -> BinResult<Pfs0Reader<'file, File>> {
-        let mut file: File = File::open(pfs0_file.as_ref())?;
+#[derive(Debug)]
+pub struct Pfs0Reader {
+    reader: ReaderType,
+    pub pfs: Pfs0
+}
 
-        let pfs0 = file.borrow_mut().read_le()?;
-        file.rewind();
+#[derive(Debug)]
+enum ReaderType {
+    Raw(File),
+    Mapped(Mmap)
+}
+
+impl Pfs0Reader {
+    pub fn parse_file<P: AsRef<Path>>(pfs0_file: P) -> BinResult<Pfs0Reader> {
+        let mut file: File = File::open(pfs0_file.as_ref())?;
+        let pfs = file.read_le()?;
 
         Ok(Pfs0Reader {
-            reader: &mut file,
-            pfs0,
+            reader: ReaderType::Raw(file),
+            pfs,
         })
     }
 
-    pub fn parse_file_mmap<'file, P: AsRef<Path>>(
+    pub fn parse_file_mmap<P: AsRef<Path>>(
         pfs0_file: P,
-    ) -> BinResult<Pfs0Reader<'file, File>> {
-        let &mut reader =
-            unsafe { memmap::MmapOptions::new().map(File::open(pfs0_file.as_ref())?.as_ref()) };
+    ) -> BinResult<Pfs0Reader> {
+        let memmap =
+            unsafe { memmap::MmapOptions::new().map(&File::open(pfs0_file.as_ref())?)? };
+        let mut cursor = Cursor::new(&memmap[..]);
 
-        let pfs0 = reader.read_le()?;
-        reader.rewind();
+        let pfs0 = cursor.read_le()?;
 
-        Ok(Pfs0Reader { reader, pfs0 })
+        Ok(Pfs0Reader { reader: ReaderType::Mapped(memmap), pfs: pfs0 })
+    }
+
+    pub fn list_files(&self) -> Vec<String> {
+        self.pfs.files.iter().map( |f: &Pfs0FileRecord| {
+            f.file_name.to_string()
+        })
+        .collect()
+    }
+
+    pub fn get_file_data<S: std::string::ToString>(&mut self, file_name: S) -> Option<Result<Vec<u8>>> {
+        let matched_files: Vec<&Pfs0FileRecord> = self.pfs.files.iter().filter(|f| f.file_name.to_string() == file_name.to_string()).collect();
+
+        if matched_files.len() == 0 {
+            return None;
+        }
+
+        let &Pfs0FileRecord { file_offset, file_size, file_name: _ } = matched_files[0];
+
+        match self.reader {
+            ReaderType::Mapped(ref map) =>  Some(read_restore(&mut Cursor::new(&map[..]), file_offset, file_size)),
+            ReaderType::Raw(ref mut f) => Some(read_restore(f, file_offset, file_size))
+        }
     }
 }
