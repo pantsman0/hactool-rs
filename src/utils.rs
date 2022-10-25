@@ -41,7 +41,7 @@ impl IntoSeekFrom for DummySeekFrom {
 pub(crate)type Placement<T> = FilePtr<DummySeekFrom, T>;
 
 pub(crate) fn read_restore<R: Read + Seek, T: From<Vec<u8>>>(reader: &mut R, offset: u64, byte_count:u64) -> std::io::Result<T> {
-    let mut output = Vec::with_capacity(byte_count as usize);
+    let mut output = vec![0; byte_count as usize];
 
     let restore_position = reader.stream_position()?;
     reader.seek(SeekFrom::Start(offset))?;
