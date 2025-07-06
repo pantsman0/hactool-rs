@@ -2,28 +2,25 @@
 name = "hactool-rs"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "hactool"
 
 [dependencies]
 anyhow = "1.0.65"
-#binread = { version = "2.2.0", features = ["std", "const_generics"]}
-binrw = "0.10.0"
-#binrw = {path = "../binrw/binrw"}
+binrw = "0.15.0"
 clap = { version = "4.0.11", features = ["derive"] }
-dirs = "4.0.0"
-env_logger = "0.9.1"
+dirs = "6.0.0"
 hex = "0.4.3"
 log = "0.4.17"
 memmap = "0.7.0"
-nom = "7.1.1"
+nom = "8.0.0"
 nom-derive = "0.10.0"
-num_enum = "0.5.7"
-proc-bitfield = "0.2.1"
+num_enum = "0.7.4"
+proc-bitfield = "0.5.2"
 regex = "1.6.0"
-rsa = "0.7.0-rc.0"
+rsa = "0.9.8"
 sha2 = "0.10.6"
-signature = "1.6.3"
+signature = "2.2.0"
 

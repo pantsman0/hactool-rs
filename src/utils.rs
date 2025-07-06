@@ -1,31 +1,30 @@
-use std::{io::{Read, Seek, SeekFrom, Cursor}, marker::PhantomData, process::Output};
+use std::io::{Read, Seek, SeekFrom, Cursor};
 
-use binrw::{prelude::*, ReadOptions, until_eof, file_ptr::IntoSeekFrom, FilePtr};
-use clap::Args;
+use binrw::{file_ptr::IntoSeekFrom, helpers::until_eof, prelude::*, Endian, FilePtr};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CurPos(pub u64);
 
 impl BinRead for CurPos {
-    type Args = ();
+    type Args<'a> = ();
 
-    fn read_options<R: Read + Seek>(reader: &mut R, _: &ReadOptions, _: Self::Args) -> BinResult<Self> {
+    fn read_options<R: Read + Seek>(reader: &mut R, _: Endian, _: Self::Args<'_>) -> BinResult<Self> {
         Ok(CurPos(reader.stream_position()?))
     }
 }
 
-pub fn until_eob<R, T, I, Arg, Ret>(bytes: I) -> impl Fn(&mut R, &ReadOptions, Arg) -> BinResult<Ret>
+pub fn until_eob<R, T, I, Arg, Ret>(bytes: I) -> impl Fn(&mut R, Endian, Arg) -> BinResult<Ret>
 where
     I: AsRef<[u8]>,
-    T: BinRead<Args = Arg>,
+    T: BinRead<Args<'static> = Arg>,
     R: Read + Seek,
     Arg: Clone,
     Ret: FromIterator<T>,
 {
-    move |_: &mut R, ro, args| {
+    move |_: &mut R, endian, args| {
         let container:Vec<u8> = bytes.as_ref().into();
         let mut cursor: Cursor<Vec<u8>> = Cursor::new(container);
-        until_eof(&mut cursor, ro, args)
+        until_eof(&mut cursor, endian, args)
     }
 }
 

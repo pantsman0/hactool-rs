@@ -3,6 +3,7 @@ use std::path::Path;
 use binrw::FilePtr32;
 use binrw::prelude::*;
 use binrw::NullString;
+use binrw::VecArgs;
 
 use crate::file_formats::Validity;
 use crate::utils::Placement;
@@ -44,6 +45,6 @@ pub struct Hfs0FileEntry {
     /// SHA256 hash of the first `hashed_prefix_len` bytes of the embedded file
     pub file_prefix_hash: super::SHA256Hash,
     /// File Data
-    #[br(parse_with = Placement::parse, offset = file_offset, count = file_size)]
+    #[br(parse_with = Placement::parse, args {offset: file_offset, inner: VecArgs {count: file_size as usize, inner: ()}})]
     pub file_data: Vec<u8>,
 }

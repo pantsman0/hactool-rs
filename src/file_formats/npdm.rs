@@ -1,6 +1,6 @@
 use std::{path::Path, io::Cursor};
 
-use binrw::{BinRead, BinReaderExt, FilePtr32, BinResult, binread};
+use binrw::{binread, BinRead, BinReaderExt, BinResult, FilePtr32, VecArgs};
 use num_enum::{FromPrimitive, IntoPrimitive};
 use proc_bitfield::bitfield;
 use rsa:: pss::{VerifyingKey, Signature};
@@ -81,7 +81,7 @@ bitfield!{
 
 mod kernel_capability {
 
-    use binrw::BinRead;
+    use binrw::{BinRead, Endian};
     use num_enum::{IntoPrimitive, FromPrimitive};
     use proc_bitfield::bitfield;
 
@@ -225,11 +225,11 @@ mod kernel_capability {
     }
 
     impl BinRead for KernelCapability {
-        type Args = ();
+        type Args<'a> = ();
         fn read_options<R: std::io::Read + std::io::Seek>(
                 reader: &mut R,
-                options: &binrw::ReadOptions,
-                args: Self::Args,
+                options: Endian,
+                args: Self::Args<'_>,
             ) -> binrw::BinResult<Self> {
                 let raw_kc = u32::read_options(reader, options, args)?;
                 match raw_kc.trailing_ones() {
@@ -262,7 +262,7 @@ mod aci0 {
 
     use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0, kernel_capability::KernelCapability};
 
-    use binrw::prelude::*;
+    use binrw::{prelude::*, VecArgs};
 
     #[binread]
     #[derive(Debug)]
@@ -278,13 +278,13 @@ mod aci0 {
         pub fah_size: u32,
         #[br(temp)] services_buffer_offset: u32,
         #[br(temp)] services_buffer_bytes: u32,
-        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + services_buffer_offset as u64 , count = services_buffer_bytes)]
+        #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + services_buffer_offset as u64, inner: VecArgs {count: services_buffer_bytes as usize, inner: ()}})]
         services_buffer: Vec<u8>,
         #[br(parse_with = until_eob(services_buffer))]
         pub services: Vec<ServiceRecord>,
         #[br(temp)] kernel_capability_buffer_offset: u32,
         #[br(temp)] kernel_capability_buffer_size: u32,
-        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + kernel_capability_buffer_offset as u64 , count = kernel_capability_buffer_size as usize)]
+        #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + kernel_capability_buffer_offset as u64, inner: VecArgs {count: kernel_capability_buffer_size as usize, inner: ()}})]
         kernel_capability_buffer: Vec<u8>,
         #[br(parse_with = until_eob(kernel_capability_buffer))]
         pub kernel_capabilities: Vec<KernelCapability>,
@@ -302,11 +302,11 @@ mod aci0 {
         pub access_flags: FsAccessFlags,
         #[br(temp)] content_owner_id_buffer_offset: u32,
         #[br(temp)] content_owner_id_buffer_size: u32,
-        #[br(parse_with = Placement::parse, offset = _cursor_position.0 + content_owner_id_buffer_offset as u64 , count = (content_owner_id_buffer_size as usize / size_of::<u64>()))]
+        #[br(parse_with = Placement::parse, args {offset: _cursor_position.0 + content_owner_id_buffer_offset as u64, inner: VecArgs {count: content_owner_id_buffer_size as usize / size_of::<u64>(), inner: ()}})]
         pub content_owner_ids: Vec<u64>,
         #[br(temp)] save_data_owner_id_buffer_offset: u32,
         #[br(temp)] save_data_owner_id_buffer_size: u32,
-        #[br(parse_with = Placement::parse, offset = _cursor_position.0 + save_data_owner_id_buffer_offset as u64 , count = (save_data_owner_id_buffer_size as usize / size_of::<u64>()))]
+        #[br(parse_with = Placement::parse, args {offset: _cursor_position.0 + save_data_owner_id_buffer_offset as u64, inner: VecArgs {count: save_data_owner_id_buffer_size as usize / size_of::<u64>(), inner: ()}})]
         pub save_data_owner_ids: Vec<u64>,
         #[br(if(content_owner_id_buffer_offset != 0x1C))]
         pub save_data_owner_id_count: Option<u32>
@@ -316,7 +316,7 @@ use aci0::*;
 
 mod acid {
 
-    use binrw::prelude::*;
+    use binrw::{prelude::*, VecArgs};
 
     use num_enum::{FromPrimitive, IntoPrimitive};
     use proc_bitfield::bitfield;
@@ -343,19 +343,19 @@ mod acid {
         pub title_id_range_max: u64,
         #[br(temp)] fac_buffer_offset: u32,
         #[br(temp)] fac_buffer_size: u32,
-        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + fac_buffer_offset as u64 , count = fac_buffer_size)]
+        #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + fac_buffer_offset as u64, inner: VecArgs {count: fac_buffer_size as usize, inner: ()}})]
         fac_buffer: Vec<u8>,
         #[br(parse_with = until_eob(fac_buffer))]
         pub file_access_control_entries: Vec<AcidFsAccessControlRecord>,
         #[br(temp)] services_buffer_offset: u32,
         #[br(temp)] services_buffer_bytes: u32,
-        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + services_buffer_offset as u64 , count = services_buffer_bytes)]
+        #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + services_buffer_offset as u64, inner: VecArgs {count: services_buffer_bytes as usize, inner: ()}})]
         services_buffer: Vec<u8>,
         #[br(parse_with = until_eob(services_buffer))]
         pub services: Vec<ServiceRecord>,
         #[br(temp)] kernel_capability_buffer_offset: u32,
         #[br(temp)] kernel_capability_buffer_size: u32,
-        #[br(temp, parse_with = Placement::parse, offset = _cursor_position.0 + kernel_capability_buffer_offset as u64 , count = kernel_capability_buffer_size as usize)]
+        #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + kernel_capability_buffer_offset as u64, inner: VecArgs {count: kernel_capability_buffer_size as usize, inner: ()}})]
         kernel_capability_buffer: Vec<u8>,
         #[br(parse_with = until_eob(kernel_capability_buffer), pad_after = 8)]
         pub kernel_capabilities: Vec<KernelCapability>
@@ -461,7 +461,7 @@ pub struct NpdmFile {
     acid_ptr: u32,
     #[br(temp)]
     acid_size: u32,
-    #[br(parse_with = Placement::parse, offset = acid_ptr as u64, count = acid_size)]
+    #[br(parse_with = Placement::parse, args {offset: acid_ptr as u64, inner: VecArgs {count: acid_size as usize, inner: ()}})]
     acid_raw: Vec<u8>,
     #[br(calc = Cursor::new(acid_raw.clone()).read_le()?)]
     pub acid: Acid
@@ -481,7 +481,7 @@ impl NpdmFile {
             let exponent = rsa::BigUint::from_bytes_le([1u8,0, 1].as_slice());
             if let Ok(rsa_pubkey) = rsa::RsaPublicKey::new(modulus_bigint, exponent){
                 let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);
-                let signature: Signature = Vec::from(self.acid.signature.as_slice()).into();
+                let signature = Signature::try_from(self.acid.signature.as_slice()).unwrap();
                 let valid = verifying_key.verify(self.acid_raw.split_at(0x200).1 , &signature).is_ok();
 
                 return if valid { Ok(Validity::Valid)} else {Ok(Validity::Invalid)};
@@ -502,7 +502,7 @@ impl NpdmFile {
         let exponent = rsa::BigUint::from_bytes_be([1,0,1].as_slice());
         let rsa_pubkey = rsa::RsaPublicKey::new(modulus_bigint, exponent).map_err(|_| Validity::CheckError)?;
         let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);
-        let signature: Signature = Vec::from(self.acid.signature.as_slice()).into();
+        let signature = Signature::try_from(self.acid.signature.as_slice()).unwrap();
         let data = self.acid_raw.split_at(0x100).1;
         println!("{:?}",data.len());
         let validity = verifying_key.verify(data, &signature);
