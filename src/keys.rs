@@ -149,8 +149,11 @@ fn hex_to_array<const N: usize>(str: &str) -> Result<[u8; N], FromHexError> {
     assert_eq!(str.len(), N * 2);
 
     let intermediate = hex::decode(str.as_bytes())?;
+    if intermediate.len() != N {
+        return Err(FromHexError::InvalidStringLength)
+    }
     let mut out = [0u8; N];
-    out.as_mut_slice().copy_from_slice(&*intermediate);
+    out.as_mut_slice().copy_from_slice(intermediate.as_slice());
 
     return Ok(out);
 }
