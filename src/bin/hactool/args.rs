@@ -16,6 +16,10 @@ pub struct Args {
    /// Input file/folder
    #[clap(short, long, value_parser, global = true)]
    pub input: Option<String>,
+
+    /// Output file/folder
+    #[clap(short, long, value_parser, global = true)]
+    pub output: Option<String>,
 }
 
 
@@ -25,7 +29,7 @@ pub enum SupportedFileTypes {
     Pfs0
 }
 
-#[derive(Debug,ValueEnum, Clone)]
+#[derive(Debug,ValueEnum, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum Action {
     Info,
     Verify,

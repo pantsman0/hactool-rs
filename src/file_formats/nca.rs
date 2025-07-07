@@ -1,4 +1,6 @@
 
+use std::mem::offset_of;
+
 use binrw::prelude::*;
 use num_enum::{TryFromPrimitive, IntoPrimitive, FromPrimitive};
 
@@ -13,7 +15,8 @@ use super::SHA256Hash;
 pub enum NcaVersion {
     Nca0 = 0x3041434E,
     Nca1 = 0x3141434E,
-    Nca2 = 0x3241434E
+    Nca2 = 0x3241434E,
+    Nca3 = 0x3341434E
 }
 
 #[repr(u8)]
@@ -75,11 +78,11 @@ pub enum KeyAreaIndex {
 
 bitfield! {
     #[binread]
-    pub struct SdkAddonVersion(u64): Debug {
-        pub raw: u64 @ ..,
+    pub struct SdkAddonVersion(u32): Debug {
+        pub raw: u32 @ ..,
 
-        zero: u8 @ 0..8,
-        pub sub_minor: u8 @ 8..16,
+        pub revision: u8 @ 0..8,
+        pub micro: u8 @ 8..16,
         pub minor: u8 @ 16..24,
         pub major: u8 @ 24..32
     }
@@ -89,9 +92,8 @@ bitfield! {
 
 #[binread]
 #[derive(Debug)]
-pub struct NcaFile {
-    #[br(temp)]
-    _cursor_position: crate::utils::CurPos,
+#[repr(C)]
+pub struct NcaFileCtx {
     pub signature: [u8;0x100],
     pub modulus: [u8;0x100],
     pub file_version: NcaVersion,
@@ -104,23 +106,26 @@ pub struct NcaFile {
     pub content_index: u32,
     pub sdk_addon_version: SdkAddonVersion,
     pub key_generation: KeyGeneration,
-    pub signature_key_generation: u8, // TODO: need enum
+    pub signature_key_generation: u8, // TODO: need enum?
     #[br(temp)] _0x222: [u8;0xE],
+    pub rights_id: [u8;16],
     pub fs_entries: [fs::FsEntry;4],
     pub file_hashes: [SHA256Hash;4],
-    pub encrypted_key_area: [[u8;0x10];4]
+    pub encrypted_key_area: [[u8;0x10];4],
+    #[br(temp)] _0x340: [u8; 0xC0],
+    pub fs_headers: [fs::FsHeader;4]
 }
 
 pub mod fs {
-    use binrw::{prelude::*};
+    use binrw::{prelude::*, FilePtr32};
     use num_enum::{TryFromPrimitive, IntoPrimitive};
 
     #[binread]
     #[derive(Debug)]
     pub struct FsEntry {
-        pub start_block_offset: u32,
-        pub end_block_offset: u32,
-        #[br(temp)] _0x8: u64
+        pub start_block_offset: FilePtr32<u8>,
+        pub end_block_offset: FilePtr32<u8>,
+        #[br(temp)] _padding: [u8;8]
     }
 
     #[repr(u8)]
@@ -196,6 +201,7 @@ pub mod fs {
     //#[br(magic = 2u16)]
     pub struct FsHeader {
         pub version: u16,
+        pub partition_type: u8, // TODO: enum
         pub fs_type: FsType,
         pub metadata_hash_type: MetadataHashType,
         #[br(temp)] _0x6: u16,

@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write};
+use std::{fs::File, path::PathBuf};
 
 use clap::Parser;
 use dirs::home_dir;
@@ -7,6 +7,8 @@ mod args;
 
 use anyhow::anyhow;
 use args::Args;
+
+use crate::args::Action;
 
 fn main() -> anyhow::Result<()> {
     //let pubkey_test()
@@ -32,10 +34,50 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+    args.action.sort();
 
-    let pfs = hactool_rs::file_formats::pfs0::Pfs0Reader::parse_file(args.input.unwrap())?;
-    println!("{:#X?}", pfs);
+    match args.file_type {
+        args::SupportedFileTypes::Npdm => {
+            todo!()
+        },
+        args::SupportedFileTypes::Pfs0 => {
+            
+            for action in args.action.iter() {
+                match action {
+                    Action::Info => {
+                        let file_name = args.input.clone().ok_or(anyhow!("Input file must be provided for info action"))?;
+                        let pfs = hactool_rs::file_formats::pfs0::Pfs0Reader::parse_file(&file_name)?;
+                        println!("Pfs0 file: {}, files: {:?}", file_name, pfs.list_files().as_slice());
+                    },
+                    Action::Verify => {
+                        eprintln!("Pfs0 files have no verification metadata.");
+                        let file_name = args.input.clone().ok_or(anyhow!("Input file must be provided for info action"))?;
+                        let pfs = hactool_rs::file_formats::pfs0::Pfs0Reader::parse_file(&file_name)?;
+                        println!("{:?}", pfs);
+                    },
+                    Action::Extract => {
+                        let file_name = args.input.clone().ok_or(anyhow!("Input file must be provided for extract action"))?;
+                        let output_folder = PathBuf::from(args.output.as_ref().ok_or(anyhow!("Output folder must be provided for extract action"))?);
+                        let mut pfs = hactool_rs::file_formats::pfs0::Pfs0Reader::parse_file(&file_name)?;
 
+                        for file in pfs.list_files() {
+                            let mut output_file = output_folder.clone();
+                            output_file.push(&file);
+
+                            
+                            println!("Extracting {}...", output_file.display());
+                            
+                            pfs.read_file_into(file, &mut File::create(output_file.as_path())?)?;
+
+                        }
+                    },
+                    Action::Create => {
+                        todo!()
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }

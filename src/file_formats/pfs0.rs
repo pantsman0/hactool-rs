@@ -1,22 +1,22 @@
 use std::fs::File;
 use std::io::Cursor;
 use std::io::Result;
+use std::io::Write;
 use std::path::Path;
 
 use binrw::prelude::*;
 use binrw::BinReaderExt;
 use binrw::FilePtr32;
 use binrw::NullString;
-use memmap::Mmap;
 
-use crate::utils::CurPos;
-use crate::utils::read_restore;
+use crate::utils::{CurPos, ReaderType};
+use crate::utils::{read_restore, read_restore_into};
 
 #[binread]
 #[derive(Debug)]
 pub struct Pfs0 {
     /// Embed current cursor position since the PFS0 may be embedded in an NCA file
-    #[br(temp)] cursor_position: crate::utils::CurPos,
+    #[br(temp)] cursor_position: CurPos,
     /// Pfs0 header
     pub header: Pfs0Header,
 
@@ -48,8 +48,8 @@ pub struct Pfs0Header {
 pub struct Pfs0FileRecord {
     /// Offset and size of file from PFS0 header start
     #[br(temp)]
-    pfs_file_relative_offset: u64,
-    #[br(calc = pfs_file_relative_offset + file_data_absolute_start)]
+    file_table_offset: u64,
+    #[br(calc = file_table_offset + file_data_absolute_start)]
     pub file_offset: u64,
     pub file_size: u64,
     /// Embedded file path
@@ -61,12 +61,6 @@ pub struct Pfs0FileRecord {
 pub struct Pfs0Reader {
     reader: ReaderType,
     pub pfs: Pfs0
-}
-
-#[derive(Debug)]
-enum ReaderType {
-    Raw(File),
-    Mapped(Mmap)
 }
 
 impl Pfs0Reader {
@@ -99,18 +93,23 @@ impl Pfs0Reader {
         .collect()
     }
 
-    pub fn get_file_data<S: std::string::ToString>(&mut self, file_name: S) -> Option<Result<Vec<u8>>> {
-        let matched_files: Vec<&Pfs0FileRecord> = self.pfs.files.iter().filter(|f| f.file_name.to_string() == file_name.to_string()).collect();
-
-        if matched_files.len() == 0 {
-            return None;
-        }
-
-        let &Pfs0FileRecord { file_offset, file_size, file_name: _ } = matched_files[0];
+    pub fn get_file_data<S: AsRef<str>>(&mut self, file_name: S) -> Option<Result<Vec<u8>>> {
+        let file_name = file_name.as_ref();
+        let Pfs0FileRecord { file_offset, file_size, file_name: _ } = self.pfs.files.iter().find(|f| f.file_name.to_string().as_str() == file_name)?;
 
         match self.reader {
-            ReaderType::Mapped(ref map) =>  Some(read_restore(&mut Cursor::new(&map[..]), file_offset, file_size)),
-            ReaderType::Raw(ref mut f) => Some(read_restore(f, file_offset, file_size))
+            ReaderType::Mapped(ref map) =>  Some(read_restore(&mut Cursor::new(&map[..]), *file_offset, *file_size)),
+            ReaderType::Raw(ref mut f) => Some(read_restore(f, *file_offset, *file_size))
+        }
+    }
+
+    pub fn read_file_into<S: AsRef<str>>(&mut self, file_name: S, writer: &mut dyn Write) -> Result<()> {
+        let file_name = file_name.as_ref();
+        let Pfs0FileRecord { file_offset, file_size, file_name: _ } = self.pfs.files.iter().find(|f| f.file_name.to_string().as_str() == file_name).ok_or(std::io::Error::new(std::io::ErrorKind::NotFound, "Can't find named file in Pfs0 archive."))?;
+
+        match self.reader {
+            ReaderType::Mapped(ref map) =>  read_restore_into(&mut Cursor::new(&map[..]), writer, *file_offset, *file_size as usize),
+            ReaderType::Raw(ref mut f) => read_restore_into(f, writer, *file_offset, *file_size as usize)
         }
     }
 }

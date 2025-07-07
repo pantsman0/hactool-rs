@@ -1,6 +1,13 @@
-use std::io::{Read, Seek, SeekFrom, Cursor};
+use std::{fs::File, io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write}};
 
 use binrw::{file_ptr::IntoSeekFrom, helpers::until_eof, prelude::*, Endian, FilePtr};
+use memmap::Mmap;
+
+#[derive(Debug)]
+pub(crate) enum ReaderType {
+    Raw(File),
+    Mapped(Mmap)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CurPos(pub u64);
@@ -48,4 +55,21 @@ pub(crate) fn read_restore<R: Read + Seek, T: From<Vec<u8>>>(reader: &mut R, off
     reader.seek(SeekFrom::Start(restore_position))?;
 
     return Ok(output.into());
+}
+
+pub(crate) fn read_restore_into<R: Read + Seek>(reader: &mut R, writer: &mut dyn Write, offset: u64, mut byte_count:usize) -> std::io::Result<()> {
+    let mut output = [0; 4*1024];
+
+
+
+    let restore_position = reader.stream_position()?;
+    reader.seek(SeekFrom::Start(offset))?;
+    while byte_count > 0 {
+        let read_bytes = reader.read(&mut output[..byte_count.min(4*1024)])?;
+        byte_count -= read_bytes;
+        writer.write_all(&output[..read_bytes])?;
+    }
+    reader.seek(SeekFrom::Start(restore_position))?;
+
+    return Ok(());
 }
