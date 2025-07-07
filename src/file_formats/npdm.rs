@@ -1,20 +1,18 @@
-use std::{path::Path, io::Cursor};
+use std::{io::Cursor, path::Path};
 
-use binrw::{binread, BinRead, BinReaderExt, BinResult, FilePtr32, VecArgs};
+use binrw::{BinRead, BinReaderExt, BinResult, FilePtr32, VecArgs, binread};
 use num_enum::{FromPrimitive, IntoPrimitive};
 use proc_bitfield::bitfield;
-use rsa:: pss::{VerifyingKey, Signature};
+use rsa::pss::{Signature, VerifyingKey};
 use sha2::Sha256;
 use signature::Verifier;
 
-use crate::{utils::Placement, keys::KeysetType};
 use super::Validity;
-
+use crate::{keys::KeysetType, utils::Placement};
 
 //const MAGIC_META: u32 = 0x4154454D;
 const MAGIC_ACID: u32 = 0x44494341;
 const MAGIC_ACI0: u32 = 0x30494341;
-
 
 bitfield! {
     #[derive(BinRead)]
@@ -64,13 +62,13 @@ bitfield! {
     }
 }
 
-#[derive(BinRead,Debug)]
+#[derive(BinRead, Debug)]
 pub struct ServiceRecord {
     pub header: ServiceRecordHeader,
     #[br(count = header.len())]
-    pub service_name: Vec<u8>
+    pub service_name: Vec<u8>,
 }
-bitfield!{
+bitfield! {
     #[derive(BinRead)]
     pub struct ServiceRecordHeader(u8): Debug {
         pub raw: u8 @ ..,
@@ -82,7 +80,7 @@ bitfield!{
 mod kernel_capability {
 
     use binrw::{BinRead, Endian};
-    use num_enum::{IntoPrimitive, FromPrimitive};
+    use num_enum::{FromPrimitive, IntoPrimitive};
     use proc_bitfield::bitfield;
 
     #[derive(Debug)]
@@ -97,7 +95,7 @@ mod kernel_capability {
         KernelVersion(KernelVersion),
         HandleTableSize(HandleTableSize),
         MiscFlags(MiscFlags),
-        Invalid(u32)
+        Invalid(u32),
     }
 
     bitfield! {
@@ -110,45 +108,44 @@ mod kernel_capability {
         }
     }
 
-    
-    bitfield!{
+    bitfield! {
         pub struct SystemCalls(u32): Debug {
             pub raw: u32 @ ..,
             pub syscall_id: i32 @ 5..=28,
             pub index: u8 @ 29..=31
         }
     }
-    
+
     #[repr(u8)]
-    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    #[derive(Debug, IntoPrimitive, FromPrimitive)]
     pub enum MemoryMapPermission {
         #[default]
         Rw = 0,
-        Ro
+        Ro,
     }
     #[repr(u8)]
-    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    #[derive(Debug, IntoPrimitive, FromPrimitive)]
     pub enum MemoryMapType {
         #[default]
         Io,
-        Static
+        Static,
     }
-    bitfield!{
+    bitfield! {
         pub struct MemoryMapAddrRo(u32): Debug {
             pub raw: u32 @ ..,
             pub start_address: u32 @ 7..=30,
             pub memory_permission: u8 [MemoryMapPermission] @ 31..=31
         }
-    } 
-    bitfield!{
+    }
+    bitfield! {
         pub struct MemoryMapSizeType(u32): Debug {
             pub raw: u32 @ ..,
             pub size: u32 @ 7..=26,
             pub map_type: u8 [MemoryMapType] @ 31..=31
         }
-    } 
-    
-    bitfield!{
+    }
+
+    bitfield! {
         pub struct IoMemoryMap(u32): Debug{
             pub raw: u32 @ ..,
             pub start_address: u32 @ 8..=31
@@ -156,7 +153,7 @@ mod kernel_capability {
     }
 
     #[repr(u8)]
-    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    #[derive(Debug, IntoPrimitive, FromPrimitive)]
     pub enum MemoryRegionType {
         NoMapping = 0,
         KernelTraceBuffer,
@@ -164,7 +161,7 @@ mod kernel_capability {
         DTB,
 
         #[default]
-        Invalid
+        Invalid,
     }
     bitfield! {
         pub struct MemoryRegionMap(u32): Debug {
@@ -187,14 +184,14 @@ mod kernel_capability {
     }
 
     #[repr(u8)]
-    #[derive(Debug,IntoPrimitive, FromPrimitive)]
+    #[derive(Debug, IntoPrimitive, FromPrimitive)]
     pub enum ProgramType {
         System = 0,
         Application,
         Applet,
 
         #[default]
-        Invalid
+        Invalid,
     }
     bitfield! {
         pub struct MiscParams(u32): Debug {
@@ -203,20 +200,20 @@ mod kernel_capability {
         }
     }
 
-    bitfield!{
+    bitfield! {
         pub struct KernelVersion(u32): Debug {
             pub raw: u32 @ ..,
             pub minor_version: u8 @ 15..=18,
-            pub major_version: u16 @ 19..=31 
+            pub major_version: u16 @ 19..=31
         }
     }
-    bitfield!{
+    bitfield! {
         pub struct HandleTableSize(u32): Debug {
             pub raw: u32 @ ..,
             pub table_size: u16 @ 16..=25
         }
     }
-    bitfield!{
+    bitfield! {
         pub struct MiscFlags(u32): Debug {
             pub raw: u32 @ ..,
             pub enable_debug: bool @ 17,
@@ -227,42 +224,50 @@ mod kernel_capability {
     impl BinRead for KernelCapability {
         type Args<'a> = ();
         fn read_options<R: std::io::Read + std::io::Seek>(
-                reader: &mut R,
-                options: Endian,
-                args: Self::Args<'_>,
-            ) -> binrw::BinResult<Self> {
-                let raw_kc = u32::read_options(reader, options, args)?;
-                match raw_kc.trailing_ones() {
-                    3 => Ok(Self::ThreadInfo(ThreadInfo(raw_kc))),
-                    4 => Ok(Self::EnableSystemCalls(SystemCalls(raw_kc))),
-                    6 => {
-                        //MemoryMaps come in pairs of 2 so the next one also needs to also have 6 trailing ones
-                        let raw_kc2 = u32::read_options(reader, options, args)?;
-                        if raw_kc2.trailing_ones() != 6 {
-                            return Err(binrw::Error::AssertFail { pos: (reader.stream_position()?-4), message: String::from("Error: MemoryMap value found without surrogate value")})
-                        }
-                        Ok(Self::MemoryMap(MemoryMapAddrRo(raw_kc), MemoryMapSizeType(raw_kc2)))
-                    },
-                    7 => Ok(Self::IoMemoryMap(IoMemoryMap(raw_kc))),
-                    10=> Ok(Self::MemoryRegionMap(MemoryRegionMap(raw_kc))),
-                    11=> Ok(Self::EnableInterrupts(Interrupts(raw_kc))),
-                    13=> Ok(Self::MiscParams(MiscParams(raw_kc))),
-                    14=> Ok(Self::KernelVersion(KernelVersion(raw_kc))),
-                    15=> Ok(Self::HandleTableSize(HandleTableSize(raw_kc))),
-                    16=> Ok(Self::MiscFlags(MiscFlags(raw_kc))),
-                    _ => Ok(Self::Invalid(raw_kc))
+            reader: &mut R,
+            options: Endian,
+            args: Self::Args<'_>,
+        ) -> binrw::BinResult<Self> {
+            let raw_kc = u32::read_options(reader, options, args)?;
+            match raw_kc.trailing_ones() {
+                3 => Ok(Self::ThreadInfo(ThreadInfo(raw_kc))),
+                4 => Ok(Self::EnableSystemCalls(SystemCalls(raw_kc))),
+                6 => {
+                    //MemoryMaps come in pairs of 2 so the next one also needs to also have 6 trailing ones
+                    let raw_kc2 = u32::read_options(reader, options, args)?;
+                    if raw_kc2.trailing_ones() != 6 {
+                        return Err(binrw::Error::AssertFail {
+                            pos: (reader.stream_position()? - 4),
+                            message: String::from(
+                                "Error: MemoryMap value found without surrogate value",
+                            ),
+                        });
+                    }
+                    Ok(Self::MemoryMap(
+                        MemoryMapAddrRo(raw_kc),
+                        MemoryMapSizeType(raw_kc2),
+                    ))
                 }
+                7 => Ok(Self::IoMemoryMap(IoMemoryMap(raw_kc))),
+                10 => Ok(Self::MemoryRegionMap(MemoryRegionMap(raw_kc))),
+                11 => Ok(Self::EnableInterrupts(Interrupts(raw_kc))),
+                13 => Ok(Self::MiscParams(MiscParams(raw_kc))),
+                14 => Ok(Self::KernelVersion(KernelVersion(raw_kc))),
+                15 => Ok(Self::HandleTableSize(HandleTableSize(raw_kc))),
+                16 => Ok(Self::MiscFlags(MiscFlags(raw_kc))),
+                _ => Ok(Self::Invalid(raw_kc)),
+            }
         }
     }
 }
 mod aci0 {
     use core::mem::size_of;
 
-    use crate::utils::{until_eob, Placement};
+    use crate::utils::{Placement, until_eob};
 
-    use super::{FsAccessFlags, ServiceRecord, MAGIC_ACI0, kernel_capability::KernelCapability};
+    use super::{FsAccessFlags, MAGIC_ACI0, ServiceRecord, kernel_capability::KernelCapability};
 
-    use binrw::{prelude::*, VecArgs};
+    use binrw::{VecArgs, prelude::*};
 
     #[binread]
     #[derive(Debug)]
@@ -271,24 +276,28 @@ mod aci0 {
         #[br(temp)]
         _cursor_position: crate::utils::CurPos,
         pub magic: u32,
-        pub _0x4: [u8;0xC],
+        pub _0x4: [u8; 0xC],
         pub title_id: u64,
         pub _0x18: u64,
         pub fah_offset: u32,
         pub fah_size: u32,
-        #[br(temp)] services_buffer_offset: u32,
-        #[br(temp)] services_buffer_bytes: u32,
+        #[br(temp)]
+        services_buffer_offset: u32,
+        #[br(temp)]
+        services_buffer_bytes: u32,
         #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + services_buffer_offset as u64, inner: VecArgs {count: services_buffer_bytes as usize, inner: ()}})]
         services_buffer: Vec<u8>,
         #[br(parse_with = until_eob(services_buffer))]
         pub services: Vec<ServiceRecord>,
-        #[br(temp)] kernel_capability_buffer_offset: u32,
-        #[br(temp)] kernel_capability_buffer_size: u32,
+        #[br(temp)]
+        kernel_capability_buffer_offset: u32,
+        #[br(temp)]
+        kernel_capability_buffer_size: u32,
         #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + kernel_capability_buffer_offset as u64, inner: VecArgs {count: kernel_capability_buffer_size as usize, inner: ()}})]
         kernel_capability_buffer: Vec<u8>,
         #[br(parse_with = until_eob(kernel_capability_buffer))]
         pub kernel_capabilities: Vec<KernelCapability>,
-        pub _padding: u64
+        pub _padding: u64,
     }
 
     #[binread]
@@ -300,30 +309,34 @@ mod aci0 {
         #[br(temp, count = 3)]
         pub _padding: Vec<u8>,
         pub access_flags: FsAccessFlags,
-        #[br(temp)] content_owner_id_buffer_offset: u32,
-        #[br(temp)] content_owner_id_buffer_size: u32,
+        #[br(temp)]
+        content_owner_id_buffer_offset: u32,
+        #[br(temp)]
+        content_owner_id_buffer_size: u32,
         #[br(parse_with = Placement::parse, args {offset: _cursor_position.0 + content_owner_id_buffer_offset as u64, inner: VecArgs {count: content_owner_id_buffer_size as usize / size_of::<u64>(), inner: ()}})]
         pub content_owner_ids: Vec<u64>,
-        #[br(temp)] save_data_owner_id_buffer_offset: u32,
-        #[br(temp)] save_data_owner_id_buffer_size: u32,
+        #[br(temp)]
+        save_data_owner_id_buffer_offset: u32,
+        #[br(temp)]
+        save_data_owner_id_buffer_size: u32,
         #[br(parse_with = Placement::parse, args {offset: _cursor_position.0 + save_data_owner_id_buffer_offset as u64, inner: VecArgs {count: save_data_owner_id_buffer_size as usize / size_of::<u64>(), inner: ()}})]
         pub save_data_owner_ids: Vec<u64>,
         #[br(if(content_owner_id_buffer_offset != 0x1C))]
-        pub save_data_owner_id_count: Option<u32>
+        pub save_data_owner_id_count: Option<u32>,
     }
 }
 use aci0::*;
 
 mod acid {
 
-    use binrw::{prelude::*, VecArgs};
+    use binrw::{VecArgs, prelude::*};
 
     use num_enum::{FromPrimitive, IntoPrimitive};
     use proc_bitfield::bitfield;
 
-    use crate::utils::{until_eob, Placement};
+    use crate::utils::{Placement, until_eob};
 
-    use super::{ServiceRecord, MAGIC_ACID, kernel_capability::KernelCapability};
+    use super::{MAGIC_ACID, ServiceRecord, kernel_capability::KernelCapability};
 
     #[binread]
     #[derive(Debug)]
@@ -331,8 +344,8 @@ mod acid {
     pub struct Acid {
         #[br(temp)]
         _cursor_position: crate::utils::CurPos,
-        pub signature: [u8;0x100],
-        pub modulus: [u8;0x100],
+        pub signature: [u8; 0x100],
+        pub modulus: [u8; 0x100],
         pub magic: u32,
         pub size: u32,
         pub version: u8,
@@ -341,24 +354,30 @@ mod acid {
         pub flags: AcidFlags,
         pub title_id_range_min: u64,
         pub title_id_range_max: u64,
-        #[br(temp)] fac_buffer_offset: u32,
-        #[br(temp)] fac_buffer_size: u32,
+        #[br(temp)]
+        fac_buffer_offset: u32,
+        #[br(temp)]
+        fac_buffer_size: u32,
         #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + fac_buffer_offset as u64, inner: VecArgs {count: fac_buffer_size as usize, inner: ()}})]
         fac_buffer: Vec<u8>,
         #[br(parse_with = until_eob(fac_buffer))]
         pub file_access_control_entries: Vec<AcidFsAccessControlRecord>,
-        #[br(temp)] services_buffer_offset: u32,
-        #[br(temp)] services_buffer_bytes: u32,
+        #[br(temp)]
+        services_buffer_offset: u32,
+        #[br(temp)]
+        services_buffer_bytes: u32,
         #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + services_buffer_offset as u64, inner: VecArgs {count: services_buffer_bytes as usize, inner: ()}})]
         services_buffer: Vec<u8>,
         #[br(parse_with = until_eob(services_buffer))]
         pub services: Vec<ServiceRecord>,
-        #[br(temp)] kernel_capability_buffer_offset: u32,
-        #[br(temp)] kernel_capability_buffer_size: u32,
+        #[br(temp)]
+        kernel_capability_buffer_offset: u32,
+        #[br(temp)]
+        kernel_capability_buffer_size: u32,
         #[br(temp, parse_with = Placement::parse, args {offset: _cursor_position.0 + kernel_capability_buffer_offset as u64, inner: VecArgs {count: kernel_capability_buffer_size as usize, inner: ()}})]
         kernel_capability_buffer: Vec<u8>,
         #[br(parse_with = until_eob(kernel_capability_buffer), pad_after = 8)]
-        pub kernel_capabilities: Vec<KernelCapability>
+        pub kernel_capabilities: Vec<KernelCapability>,
     }
 
     #[binread]
@@ -376,7 +395,7 @@ mod acid {
         #[br(count = content_owner_id_count as usize)]
         pub content_owner_ids: Vec<u64>,
         #[br(count = save_data_owner_id_count as usize)]
-        pub save_data_owner_ids: Vec<u64>
+        pub save_data_owner_ids: Vec<u64>,
     }
 
     #[repr(u8)]
@@ -388,7 +407,7 @@ mod acid {
         NonSecureSystem,
 
         #[default]
-        Reserved
+        Reserved,
     }
 
     bitfield! {
@@ -405,11 +424,10 @@ mod acid {
             pub memory_region: u8 [MemoryRegion] @ 2..=5,
         }
     }
-
 }
 use acid::*;
 
-#[derive(Debug,FromPrimitive,IntoPrimitive)]
+#[derive(Debug, FromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum ProcessAddressSpace {
     Address32Bit,
@@ -418,7 +436,7 @@ pub enum ProcessAddressSpace {
     Address64BitNew,
 
     #[default]
-    Reserved
+    Reserved,
 }
 
 bitfield! {
@@ -449,11 +467,11 @@ pub struct NpdmFile {
     #[brw(pad_after = 4)]
     pub default_cpu_core: u8,
     pub system_resource_size: u32,
-    pub version:u32,
+    pub version: u32,
     pub main_stack_size: u32,
-    pub title_name: [u8;0x10],
+    pub title_name: [u8; 0x10],
     #[brw(pad_after = 0x30)]
-    pub product_code: [u8;0x10],
+    pub product_code: [u8; 0x10],
     #[br(parse_with = FilePtr32::parse)]
     pub aci0: Aci0,
     pub aci0_size: u32,
@@ -464,51 +482,63 @@ pub struct NpdmFile {
     #[br(parse_with = Placement::parse, args {offset: acid_ptr as u64, inner: VecArgs {count: acid_size as usize, inner: ()}})]
     acid_raw: Vec<u8>,
     #[br(calc = Cursor::new(acid_raw.clone()).read_le()?)]
-    pub acid: Acid
+    pub acid: Acid,
 }
-
 
 impl NpdmFile {
     pub fn parse<P: AsRef<Path>>(npdm_file: P) -> BinResult<NpdmFile> {
-
         let mut file = std::fs::File::open(npdm_file.as_ref())?;
 
         file.read_le()
     }
 
-    pub fn verify_with_hex_str(&self, verification_key_modulus: String) -> Result<Validity, Validity> {
-        if let Some(modulus_bigint) = rsa::BigUint::from_radix_le(verification_key_modulus.as_bytes(), 16) {
-            let exponent = rsa::BigUint::from_bytes_le([1u8,0, 1].as_slice());
-            if let Ok(rsa_pubkey) = rsa::RsaPublicKey::new(modulus_bigint, exponent){
+    pub fn verify_with_hex_str(
+        &self,
+        verification_key_modulus: String,
+    ) -> Result<Validity, Validity> {
+        if let Some(modulus_bigint) =
+            rsa::BigUint::from_radix_le(verification_key_modulus.as_bytes(), 16)
+        {
+            let exponent = rsa::BigUint::from_bytes_le([1u8, 0, 1].as_slice());
+            if let Ok(rsa_pubkey) = rsa::RsaPublicKey::new(modulus_bigint, exponent) {
                 let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);
                 let signature = Signature::try_from(self.acid.signature.as_slice()).unwrap();
-                let valid = verifying_key.verify(self.acid_raw.split_at(0x200).1 , &signature).is_ok();
+                let valid = verifying_key
+                    .verify(self.acid_raw.split_at(0x200).1, &signature)
+                    .is_ok();
 
-                return if valid { Ok(Validity::Valid)} else {Ok(Validity::Invalid)};
+                return if valid {
+                    Ok(Validity::Valid)
+                } else {
+                    Ok(Validity::Invalid)
+                };
             } else {
-                return  Err(Validity::CheckError);
+                return Err(Validity::CheckError);
             }
-        } 
-        return Err(Validity::CheckError);
+        } else {
+            Err(Validity::CheckError)
+        }
     }
 
     pub fn verify_acid(&self, key_type: KeysetType) -> Result<Validity, Validity> {
-        if self.acid_sign_key_index > 1 { return Err(Validity::Invalid); }
         let acid_sign_key = match key_type {
-            KeysetType::Retail => crate::keys::constants::retail_keys::ACID_FIXED_KEY_MODULI[self.acid_sign_key_index as usize],
-            KeysetType::Dev => crate::keys::constants::development_keys::ACID_FIXED_KEY_MODULI[self.acid_sign_key_index as usize]
+            KeysetType::Retail => crate::keys::constants::retail_keys::ACID_FIXED_KEY_MODULI
+                .get(self.acid_sign_key_index as usize)
+                .ok_or(Validity::Invalid)?,
+            KeysetType::Dev => crate::keys::constants::development_keys::ACID_FIXED_KEY_MODULI
+                .get(self.acid_sign_key_index as usize)
+                .ok_or(Validity::Invalid)?,
         };
         let modulus_bigint = rsa::BigUint::from_bytes_be(acid_sign_key.as_slice());
-        let exponent = rsa::BigUint::from_bytes_be([1,0,1].as_slice());
-        let rsa_pubkey = rsa::RsaPublicKey::new(modulus_bigint, exponent).map_err(|_| Validity::CheckError)?;
+        let exponent = rsa::BigUint::from_bytes_be([1, 0, 1].as_slice());
+        let rsa_pubkey =
+            rsa::RsaPublicKey::new(modulus_bigint, exponent).map_err(|_| Validity::CheckError)?;
         let verifying_key: VerifyingKey<Sha256> = VerifyingKey::new(rsa_pubkey);
-        let signature = Signature::try_from(self.acid.signature.as_slice()).unwrap();
+        let signature = Signature::try_from(self.acid.signature.as_slice()).expect("try_from with a slice always succeeds.");
         let data = self.acid_raw.split_at(0x100).1;
-        println!("{:?}",data.len());
         let validity = verifying_key.verify(data, &signature);
-
-        println!("{:?}", validity);
-        return if validity.is_ok() { 
+        
+        return if validity.is_ok() {
             Ok(Validity::Valid)
         } else {
             Ok(Validity::Invalid)

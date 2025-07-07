@@ -10,7 +10,7 @@ pub struct Args {
    pub file_type: SupportedFileTypes,
 
    /// The action required on the input file/folder
-   #[clap(short, long, value_parser, global = true)]
+   #[clap(short, long, value_parser, value_delimiter = ',', global = true)]
    pub action: Vec<Action>,
 
    /// Input file/folder
