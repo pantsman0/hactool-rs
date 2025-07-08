@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum, Subcommand};
+use hactool_rs::keys::KeysetType;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -20,13 +21,18 @@ pub struct Args {
     /// Output file/folder
     #[clap(short, long, value_parser, global = true)]
     pub output: Option<String>,
+
+    /// Key set
+    #[clap(short, long, value_parser, global = true, default_value = "retail")]
+    pub keyset: KeysetType
 }
 
 
 #[derive(Debug,Subcommand,ValueEnum, Clone)]
 pub enum SupportedFileTypes {
     Npdm,
-    Pfs0
+    Pfs0,
+    Nca
 }
 
 #[derive(Debug,ValueEnum, Clone, PartialEq, PartialOrd, Eq, Ord)]

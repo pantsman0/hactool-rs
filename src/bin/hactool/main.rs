@@ -15,7 +15,7 @@ fn main() -> anyhow::Result<()> {
     //let pubkey_test()
     //let pubkey = rsa::RsaPublicKey::new(BigUint::from_bytes_le(pubkey_test.as_slice()), BigUint::from_bytes_le([1u8,0, 1].as_slice())).unwrap();
     //let key: VerifyingKey<Sha256> = rsa::pss::VerifyingKey::new(pubkey);
-    let _keys = match home_dir() {
+    let keys = match home_dir() {
         Some(ref mut path) => {
             path.push(".switch");
             path.push("prod.keys");
@@ -119,6 +119,33 @@ fn main() -> anyhow::Result<()> {
 
                             pfs.read_file_into(file, &mut File::create(output_file.as_path())?)?;
                         }
+                    }
+                    Action::Create => {
+                        todo!()
+                    }
+                }
+            }
+        },
+        args::SupportedFileTypes::Nca => {
+            for action in args.action.iter() {
+                match action {
+                    Action::Info => {
+                        let file_name = args
+                            .input
+                            .clone()
+                            .ok_or(anyhow!("Input file must be provided for info action"))?;
+                        let nca_reader =
+                            hactool_rs::file_formats::nca::NcaFileReader::parse_file(&file_name, &keys)?;
+                        println!(
+                            "Nca file: {:X?}",
+                            nca_reader.nca_ctx
+                        );
+                    }
+                    Action::Verify => {
+                        todo!()
+                    }
+                    Action::Extract => {
+                        todo!()
                     }
                     Action::Create => {
                         todo!()

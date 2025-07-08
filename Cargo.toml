@@ -8,6 +8,7 @@ edition = "2024"
 name = "hactool"
 
 [dependencies]
+aes = "0.8.4"
 anyhow = "1.0.65"
 binrw = "0.15.0"
 clap = { version = "4.0.11", features = ["derive"] }
@@ -24,4 +25,9 @@ rsa = "0.9.8"
 sha2 = "0.10.6"
 signature = "2.2.0"
 static_assertions = "1.1.0"
+xts-mode = "0.5.1"
+phf = "0.12"
 
+[build-dependencies]
+phf = "0.12"
+phf_codegen = "0.12"

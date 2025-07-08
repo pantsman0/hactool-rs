@@ -1,4 +1,4 @@
-use std::{fs::File, io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write}};
+use std::{fs::File, io::{ Cursor, Read, Seek, SeekFrom, Write}};
 
 use binrw::{file_ptr::IntoSeekFrom, helpers::until_eof, prelude::*, Endian, FilePtr};
 use memmap::Mmap;

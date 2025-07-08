@@ -1,13 +1,16 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
     fs::File,
     io::{BufRead, BufReader},
     path::Path,
 };
 
+include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
+
+use clap::ValueEnum;
 use hex::FromHexError;
 use regex::Regex;
 
+#[derive(Debug,ValueEnum, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum KeysetType {
     Dev,
     Retail,
@@ -112,32 +115,22 @@ impl NcaKeys {
         let regex = Regex::new("^([a-z0-9_]+) = ([a-fA-F0-9]+)")
             .expect("Error building keyfile regex. Exiting...");
 
-        let mut key_map: HashMap<String, String> = HashMap::new();
-        for line in BufReader::new(file).lines() {
-            match regex.captures(line?.as_ref()) {
-                None => continue,
-                Some(captures) => {
-                    key_map.insert(captures[0].to_string(), captures[1].to_string());
-                }
-            }
-        }
-
         // SAFETY: the pattern of all zeros is valid for all data types contained in `NcaKeys`
         let mut keys: NcaKeys = unsafe { std::mem::zeroed() };
 
-        if let Some(key) = key_map.get("secure_boot_key") {
-            keys.secure_boot_key = hex_to_array(key)?;
-        }
-        if let Some(key) = key_map.get("tsec_key") {
-            keys.tsec_key = hex_to_array(key)?;
-        }
-        if let Some(key) = key_map.get("device_key") {
-            keys.device_key = hex_to_array(key)?;
-        }
-        for index in 0..0x20u8 {
-            let key_name = format!("keyblob_key_{:02x}", index);
-            if let Some(key) = key_map.get(&key_name) {
-                keys.keyblob_keys[index as usize] = hex_to_array(key)?;
+        for line in BufReader::new(file).lines() {
+            let line = line?;
+            match regex.captures(&line) {
+                None => {
+                    eprintln!("Warning: Unrecognised keyfile line - {}", line);
+                },
+                Some(captures) => {
+                    if let Some(&key_handler) = KEY_HANDLERS.get(captures[1].trim()) {
+                        key_handler(&mut keys, captures[2].trim())?;
+                    } else {
+                        eprintln!("[WARN]: Failed to match key \"{}\",  (value \"{}\")", captures[1].trim(), captures[2].trim());
+                    }
+                }
             }
         }
 
@@ -146,8 +139,6 @@ impl NcaKeys {
 }
 
 fn hex_to_array<const N: usize>(str: &str) -> Result<[u8; N], FromHexError> {
-    assert_eq!(str.len(), N * 2);
-
     let intermediate = hex::decode(str.as_bytes())?;
     if intermediate.len() != N {
         return Err(FromHexError::InvalidStringLength)

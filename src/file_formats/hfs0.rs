@@ -1,11 +1,9 @@
-use std::path::Path;
 
 use binrw::FilePtr32;
 use binrw::prelude::*;
 use binrw::NullString;
 use binrw::VecArgs;
 
-use crate::file_formats::Validity;
 use crate::utils::Placement;
 
 const MAGIC_HFS0:u32 = 0x30534648;
